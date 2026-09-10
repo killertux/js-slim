@@ -128,16 +128,27 @@ export class MethodResolver {
     arity: number,
     libraries: readonly object[] = [],
   ): MethodMatch | undefined {
-    const chain = this.receiverChain(target, libraries);
+    return this.resolveInTargets(this.receiverChain(target, libraries), methodName, arity);
+  }
 
-    for (const receiver of chain) {
+  /**
+   * Resolve across an explicit receiver chain (fixture, SUT, libraries).
+   *
+   * Exact-arity matches win anywhere in the chain before any relaxed match.
+   */
+  resolveInTargets(
+    targets: readonly object[],
+    methodName: string,
+    arity: number,
+  ): MethodMatch | undefined {
+    for (const receiver of targets) {
       const exact = findMethod(receiver, methodName, (method) => method.length === arity);
       if (exact !== undefined) {
         return { receiver, ...exact };
       }
     }
 
-    for (const receiver of chain) {
+    for (const receiver of targets) {
       const relaxed = findMethod(receiver, methodName, (method) => method.length < arity);
       if (relaxed !== undefined) {
         return { receiver, ...relaxed };
