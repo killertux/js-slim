@@ -14,12 +14,6 @@ export class ObjectConverter implements Converter<unknown> {
     if (value === null || value === undefined) {
       return null;
     }
-    if (typeof value === "string") {
-      return value;
-    }
-    if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
-      return String(value);
-    }
     if (Array.isArray(value)) {
       return slimValueToString(value);
     }

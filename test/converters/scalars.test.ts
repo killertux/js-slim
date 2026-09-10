@@ -51,6 +51,11 @@ describe("NumberConverter", () => {
   it("reports a conversion failure", () => {
     expect(() => converter.fromSlim("foo")).toThrow("message:<<Can't convert foo to number.>>");
   });
+
+  it("rejects non-decimal literals", () => {
+    expect(() => converter.fromSlim("0x10")).toThrow(SlimError);
+    expect(() => converter.fromSlim("Infinity")).toThrow(SlimError);
+  });
 });
 
 describe("BigIntConverter", () => {
@@ -69,6 +74,7 @@ describe("BigIntConverter", () => {
   it("reports a conversion failure", () => {
     expect(() => converter.fromSlim("foo")).toThrow("message:<<Can't convert foo to long.>>");
     expect(() => converter.fromSlim("1.5")).toThrow(SlimError);
+    expect(() => converter.fromSlim("0x10")).toThrow(SlimError);
   });
 });
 

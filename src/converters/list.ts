@@ -7,7 +7,9 @@ import type { Converter } from "./types.js";
  *
  * Port of `ListConverterHelper.fromStringToArrayOfStrings`: optional
  * surrounding brackets are removed, the remainder is split on commas and each
- * item is trimmed. A blank entry yields an empty list.
+ * item is trimmed. A blank entry yields an empty list and trailing empty items
+ * are dropped (Java's `String#split` behaviour), while interior empties are
+ * kept.
  */
 export function parseListString(value: string): string[] {
   let body = value;
@@ -20,7 +22,12 @@ export function parseListString(value: string): string[] {
   if (body.trim() === "") {
     return [];
   }
-  return body.split(",").map((item) => item.trim());
+
+  const items = body.split(",").map((item) => item.trim());
+  while (items.length > 0 && items[items.length - 1] === "") {
+    items.pop();
+  }
+  return items;
 }
 
 /** List conversion: already-decoded lists pass through, strings are parsed. */
@@ -32,7 +39,10 @@ export class ListConverter implements Converter<SlimValue[]> {
     return `[${value.map((item) => slimValueToString(item)).join(", ")}]`;
   }
 
-  fromSlim(value: SlimValue): SlimValue[] {
+  fromSlim(value: SlimValue): SlimValue[] | null {
+    if (typeof value === "string" && value.trim() === "") {
+      return null;
+    }
     return Array.isArray(value) ? value : parseListString(value);
   }
 }

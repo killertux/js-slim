@@ -1,8 +1,20 @@
 import { describe, expect, it } from "vitest";
 
 import { coerceValue, toSlimValue } from "../../src/converters/coerce.js";
+import { ConverterRegistry } from "../../src/converters/registry.js";
 import { smartCoerce } from "../../src/converters/smart.js";
+import type { Converter } from "../../src/converters/types.js";
 import { VOID_TAG } from "../../src/converters/void.js";
+
+class MarkerDateConverter implements Converter<Date> {
+  toSlim(): string {
+    return "custom-date";
+  }
+
+  fromSlim(): Date {
+    return new Date(0);
+  }
+}
 
 describe("smartCoerce", () => {
   it("coerces boolean literals", () => {
@@ -31,8 +43,16 @@ describe("smartCoerce", () => {
     expect(smartCoerce("foo")).toBe("foo");
     expect(smartCoerce("null")).toBe("null");
     expect(smartCoerce("")).toBe("");
+    expect(smartCoerce(" 42 ")).toBe(" 42 ");
     expect(smartCoerce("Infinity")).toBe("Infinity");
     expect(smartCoerce("05-May-2009")).toBe("05-May-2009");
+  });
+
+  it("keeps overflow and underflow literals as strings", () => {
+    expect(smartCoerce("1e400")).toBe("1e400");
+    expect(smartCoerce("1e-400")).toBe("1e-400");
+    expect(smartCoerce("0")).toBe(0);
+    expect(smartCoerce("0.0")).toBe(0);
   });
 
   it("returns lists as-is", () => {
@@ -59,8 +79,14 @@ describe("coerceValue", () => {
     );
   });
 
-  it("throws when no converter is registered for the type", () => {
-    expect(() => coerceValue("x", "unknown" as never)).toThrow(/NO_CONVERTER_FOR_ARGUMENT_NUMBER/);
+  it("throws with the Java message when no converter is registered", () => {
+    expect(() => coerceValue("x", "unknown" as never)).toThrow(
+      "message:<<NO_CONVERTER_FOR_ARGUMENT_NUMBER unknown.>>",
+    );
+  });
+
+  it("converts to void", () => {
+    expect(coerceValue("anything", "void")).toBeNull();
   });
 });
 
@@ -89,5 +115,17 @@ describe("toSlimValue", () => {
 
   it("stringifies other objects via their toString", () => {
     expect(toSlimValue({ toString: () => "custom object" })).toBe("custom object");
+  });
+
+  it("renders non-finite numbers like Java", () => {
+    expect(toSlimValue(Number.NaN)).toBe("NaN");
+    expect(toSlimValue(Number.POSITIVE_INFINITY)).toBe("Infinity");
+  });
+
+  it("prefers the declared type's converter", () => {
+    const registry = new ConverterRegistry();
+    registry.register(Date, new MarkerDateConverter());
+
+    expect(toSlimValue(new Date(Date.UTC(2009, 4, 5)), Date, registry)).toBe("custom-date");
   });
 });

@@ -1,5 +1,6 @@
 import { SlimError, formatSlimMessage } from "../errors.js";
 import type { SlimValue } from "../protocol/types.js";
+import { INTEGER_PATTERN } from "./smart.js";
 import { slimValueToString } from "./string.js";
 import type { Converter } from "./types.js";
 
@@ -11,14 +12,14 @@ export class BigIntConverter implements Converter<bigint> {
 
   fromSlim(value: SlimValue): bigint | null {
     const raw = slimValueToString(value);
-    if (raw.trim() === "") {
+    const trimmed = raw.trim();
+    if (trimmed === "") {
       return null;
     }
 
-    try {
-      return BigInt(raw.trim());
-    } catch (error) {
-      throw new SlimError(formatSlimMessage(`Can't convert ${raw} to long.`), { cause: error });
+    if (!INTEGER_PATTERN.test(trimmed)) {
+      throw new SlimError(formatSlimMessage(`Can't convert ${raw} to long.`));
     }
+    return BigInt(trimmed);
   }
 }

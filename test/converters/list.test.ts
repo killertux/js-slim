@@ -16,10 +16,12 @@ describe("parseListString", () => {
     expect(parseListString("[]")).toEqual([]);
     expect(parseListString("")).toEqual([]);
     expect(parseListString(" ")).toEqual([]);
+    expect(parseListString(",")).toEqual([]);
   });
 
-  it("keeps interior empty items", () => {
+  it("keeps interior empty items but drops trailing ones", () => {
     expect(parseListString("[1, ,3]")).toEqual(["1", "", "3"]);
+    expect(parseListString("[1,2,]")).toEqual(["1", "2"]);
   });
 });
 
@@ -39,5 +41,10 @@ describe("ListConverter", () => {
 
   it("parses the string form", () => {
     expect(converter.fromSlim("[1, 2]")).toEqual(["1", "2"]);
+  });
+
+  it("returns null for blank input", () => {
+    expect(converter.fromSlim("")).toBeNull();
+    expect(converter.fromSlim("  ")).toBeNull();
   });
 });

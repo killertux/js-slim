@@ -2,6 +2,7 @@ import type { SlimValue } from "../protocol/types.js";
 import { slimValueToString } from "./string.js";
 import type { Converter } from "./types.js";
 
+const TABLE_START_PATTERN = /<table\b/gi;
 const TABLE_PATTERN = /<table\b[^>]*>([\s\S]*?)<\/table>/gi;
 const ROW_PATTERN = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
 const CELL_PATTERN = /<td\b[^>]*>([\s\S]*?)<\/td>/gi;
@@ -10,8 +11,8 @@ const CELL_PATTERN = /<td\b[^>]*>([\s\S]*?)<\/td>/gi;
 export function formatHashTable(map: ReadonlyMap<unknown, unknown>): string {
   let rows = "";
   for (const [key, value] of map) {
-    const keyCell = escapeHtml(stringifyCell(key));
-    const valueCell = escapeHtml(stringifyCell(value));
+    const keyCell = escapeHtml(formatCell(key));
+    const valueCell = escapeHtml(formatCell(value));
     rows +=
       `<tr class="hash_row"><td class="hash_key">${keyCell}</td>` +
       `<td class="hash_value">${valueCell}</td></tr>`;
@@ -22,18 +23,24 @@ export function formatHashTable(map: ReadonlyMap<unknown, unknown>): string {
 /**
  * Parse a FitNesse hash-widget table into a `Map`.
  *
- * @returns the parsed map, or `null` when the input is not a single table.
+ * @returns the parsed map, or `null` when the input is not exactly one table.
  *   Rows that do not have exactly two cells are ignored (Java parity).
  */
 export function parseHashTable(html: string): Map<string, string> | null {
-  const tables = [...html.matchAll(TABLE_PATTERN)];
-  if (tables.length !== 1) {
+  if ([...html.matchAll(TABLE_START_PATTERN)].length !== 1) {
+    return null;
+  }
+
+  const table = [...html.matchAll(TABLE_PATTERN)][0];
+  if (table === undefined) {
     return null;
   }
 
   const map = new Map<string, string>();
-  for (const row of (tables[0] as RegExpMatchArray)[1]!.matchAll(ROW_PATTERN)) {
-    const cells = [...row[1]!.matchAll(CELL_PATTERN)].map((cell) => unescapeHtml(cell[1]!.trim()));
+  for (const row of (table[1] as string).matchAll(ROW_PATTERN)) {
+    const cells = [...(row[1] as string).matchAll(CELL_PATTERN)].map((cell) =>
+      unescapeHtml((cell[1] as string).trim()),
+    );
     if (cells.length === 2) {
       map.set(cells[0] as string, cells[1] as string);
     }
@@ -56,9 +63,16 @@ export class MapConverter implements Converter<Map<string, string>> {
   }
 }
 
-function stringifyCell(value: unknown): string {
+/** Render a cell the way Java's `ElementConverterHelper` would. */
+function formatCell(value: unknown): string {
   if (value === null || value === undefined) {
     return "null";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(formatCell).join(", ")}]`;
+  }
+  if (value instanceof Map) {
+    return formatHashTable(value as ReadonlyMap<unknown, unknown>);
   }
   return String(value);
 }

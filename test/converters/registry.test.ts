@@ -47,4 +47,16 @@ describe("ConverterRegistry", () => {
     expect(defaultConverterRegistry.get(String)).not.toBeInstanceOf(UpperConverter);
     expect(getConverter(String)).toBe(defaultConverterRegistry.get(String));
   });
+
+  it("removes a converter", () => {
+    const registry = new ConverterRegistry();
+    registry.remove(String);
+    expect(registry.has(String)).toBe(false);
+  });
+
+  it("looks converters up in an explicit registry", () => {
+    const registry = new ConverterRegistry();
+    registry.register(String, new UpperConverter());
+    expect(getConverter(String, registry)).toBeInstanceOf(UpperConverter);
+  });
 });

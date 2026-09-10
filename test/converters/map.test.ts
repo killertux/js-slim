@@ -24,6 +24,15 @@ describe("formatHashTable", () => {
   it("renders null cells as the literal null", () => {
     expect(formatHashTable(new Map([["a", null]]))).toContain('<td class="hash_value">null</td>');
   });
+
+  it("renders list and nested-map cells like Java", () => {
+    expect(formatHashTable(new Map([["k", ["b", "c"]]]))).toContain(
+      '<td class="hash_value">[b, c]</td>',
+    );
+    expect(formatHashTable(new Map([["k", new Map([["x", "y"]])]]))).toContain(
+      '<table class="hash_table">',
+    );
+  });
 });
 
 describe("parseHashTable", () => {
@@ -45,6 +54,12 @@ describe("parseHashTable", () => {
     expect(
       parseHashTable("<table><tr><td>a</td><td>b</td></tr></table><table></table>"),
     ).toBeNull();
+  });
+
+  it("rejects input containing a nested table", () => {
+    const html =
+      "<table><tr><td>a</td><td><table><tr><td>n</td><td>v</td></tr></table></td></tr></table>";
+    expect(parseHashTable(html)).toBeNull();
   });
 
   it("unescapes cell content", () => {

@@ -1,3 +1,4 @@
+import type { SlimValue } from "../protocol/types.js";
 import { BigIntConverter } from "./bigint.js";
 import { BooleanConverter } from "./boolean.js";
 import { DateConverter } from "./date.js";
@@ -22,9 +23,17 @@ export class ConverterRegistry {
     this.registerDefaults();
   }
 
-  /** Register (or replace) the converter for a type. */
-  register<T>(type: SlimType, converter: Converter<T>): void {
-    this.converters.set(type, converter as unknown as Converter<unknown>);
+  register(type: typeof String, converter: Converter<string>): void;
+  register(type: typeof Number, converter: Converter<number>): void;
+  register(type: typeof BigInt, converter: Converter<bigint>): void;
+  register(type: typeof Boolean, converter: Converter<boolean>): void;
+  register(type: typeof Date, converter: Converter<Date>): void;
+  register(type: typeof Array, converter: Converter<SlimValue[]>): void;
+  register(type: typeof Map, converter: Converter<Map<string, string>>): void;
+  register(type: typeof Object, converter: Converter<unknown>): void;
+  register(type: "void", converter: Converter<void>): void;
+  register(type: SlimType, converter: Converter<unknown>): void {
+    this.converters.set(type, converter);
   }
 
   /** Look up the converter for a type, if any. */
@@ -35,6 +44,11 @@ export class ConverterRegistry {
   /** @returns true when a converter is registered for `type`. */
   has(type: SlimType): boolean {
     return this.converters.has(type);
+  }
+
+  /** Remove a converter (e.g. to restore a customised registry). */
+  remove(type: SlimType): void {
+    this.converters.delete(type);
   }
 
   private registerDefaults(): void {
@@ -53,7 +67,10 @@ export class ConverterRegistry {
 /** Process-wide default registry used when no other is supplied. */
 export const defaultConverterRegistry = new ConverterRegistry();
 
-/** Look up a converter in the {@link defaultConverterRegistry}. */
-export function getConverter<T = unknown>(type: SlimType): Converter<T> | undefined {
-  return defaultConverterRegistry.get<T>(type);
+/** Look up a converter, defaulting to the {@link defaultConverterRegistry}. */
+export function getConverter<T = unknown>(
+  type: SlimType,
+  registry: ConverterRegistry = defaultConverterRegistry,
+): Converter<T> | undefined {
+  return registry.get<T>(type);
 }
