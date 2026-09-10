@@ -7,12 +7,36 @@
 /** The package version, kept in sync with `package.json`. */
 export const VERSION = "0.1.0";
 
+// Errors
+
+export {
+  PRETTY_PRINT_END,
+  PRETTY_PRINT_START,
+  SLIM_ERROR,
+  SlimError,
+  formatSlimMessage,
+} from "./errors.js";
+export type { SlimErrorOptions, SlimErrorTag } from "./errors.js";
+
 // Protocol codec
 export { SlimSyntaxError } from "./protocol/errors.js";
 export { MAX_NESTING_DEPTH, deserialize } from "./protocol/deserializer.js";
 export { encodeLength, MINIMUM_NUMBER_LENGTH } from "./protocol/length.js";
 export { serialize } from "./protocol/serializer.js";
 export type { SlimList, SlimSerializable, SlimValue } from "./protocol/types.js";
+
+// Instructions
+
+export { parseInstruction } from "./instructions/parse.js";
+export type {
+  AssignInstruction,
+  CallAndAssignInstruction,
+  CallInstruction,
+  ImportInstruction,
+  InvalidInstruction,
+  MakeInstruction,
+  SlimInstruction,
+} from "./instructions/types.js";
 
 // Transport
 export { SlimClient, toResultMap } from "./transport/client.js";
