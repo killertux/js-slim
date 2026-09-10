@@ -82,6 +82,13 @@ export {
 export type { SymbolResolver } from "./runtime/symbols.js";
 export { VariableStore } from "./runtime/variable-store.js";
 export type { StoredSymbol } from "./runtime/variable-store.js";
+export { FixtureLoader, swapCaseOfFirstLetter } from "./runtime/fixture-loader.js";
+export type {
+  FixtureConstructor,
+  FixtureImporter,
+  FixtureLoaderOptions,
+  FixtureResolver,
+} from "./runtime/fixture-loader.js";
 
 // Transport
 export { SlimClient, toResultMap } from "./transport/client.js";
