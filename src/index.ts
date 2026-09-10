@@ -71,6 +71,18 @@ export {
 } from "./converters/index.js";
 export type { Converter, SlimType } from "./converters/types.js";
 
+// Runtime
+
+export {
+  SYMBOL_ASSIGNMENT_PATTERN,
+  SYMBOL_PATTERN,
+  isSymbolAssignment,
+  substituteSymbols,
+} from "./runtime/symbols.js";
+export type { SymbolResolver } from "./runtime/symbols.js";
+export { VariableStore } from "./runtime/variable-store.js";
+export type { StoredSymbol } from "./runtime/variable-store.js";
+
 // Transport
 export { SlimClient, toResultMap } from "./transport/client.js";
 export type { SlimClientOptions } from "./transport/client.js";
