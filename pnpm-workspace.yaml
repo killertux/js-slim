@@ -1,0 +1,5 @@
+# pnpm settings live here in pnpm 10+/11. See https://pnpm.io/settings.
+# esbuild ships a postinstall script that links its platform binary, so it must
+# be allowed to run during installation.
+allowBuilds:
+  esbuild: true

@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist/cjs",
+    // CommonJS emit. `moduleResolution: Node` resolves our NodeNext-style
+    // ".js" relative specifiers back to ".ts" sources. The core has zero
+    // runtime dependencies, so dependency `exports`-map resolution is not needed here.
+    "module": "CommonJS",
+    "moduleResolution": "Node"
+  },
+  "include": ["src"]
+}
