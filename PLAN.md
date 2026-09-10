@@ -384,18 +384,49 @@ the TS ones also exercise the `tsx` loader.
 
 ## CI (`.github/workflows/ci.yml`)
 
-- **quality** — matrix `node: [20.x, 22.x, 24.x]`: `pnpm install --frozen-lockfile`, `pnpm lint`,
-  `pnpm typecheck`, `pnpm build`, `pnpm coverage`; upload coverage on one leg.
-- **e2e** — Node 22 + Temurin JDK 17: `pnpm build`; download a **pinned**
-  `fitnesse-standalone.jar` (cached); render `fitnesse/FitNesseRoot/**` templates with `$PWD`
-  (absolute CLI + fixture paths); run
-  `java -jar fitnesse-standalone.jar -c "JsSlimSuite.SmokeTest?test&format=text"`; fail on errors;
-  upload FitNesse output artifacts.
-- **pack** — `pnpm pack` + `npm publish --dry-run` to validate the `exports` map, `.d.ts`, and bin.
+Three jobs, all on `ubuntu-latest`:
 
-The committed wiki page defines `!define TEST_SYSTEM {slim}`,
-`!define COMMAND_PATTERN {node <abs>/dist/cli.js %p}`, `!define SLIM_PORT {9123}`, an
-`|import|` of the absolute fixtures dir, a script table, and a decision table.
+- **quality** — matrix `node: [20.x, 22.x, 24.x]`: `pnpm install --frozen-lockfile`,
+  `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm coverage`; the coverage
+  artifact is uploaded from the 22.x leg. `build` runs **before** coverage because
+  `test/cli-bin.test.ts` executes the built CLI and skips a stale build.
+- **e2e** — Node 22 + Temurin JDK 17: `pnpm build`; download the **pinned**
+  `fitnesse-standalone.jar` (`20241026`, cached under `.fitnesse/`); render
+  `fitnesse/FitNesseRoot/**` with `scripts/render-fitnesse.mjs`; run `pnpm test:e2e`
+  (`test/e2e/fitnesse.test.ts` driving `scripts/run-fitnesse.mjs`); upload the FitNesse
+  `files/testResults` artifacts.
+- **pack** — `pnpm pack`, `npm publish --dry-run`, then `scripts/verify-package.mjs`, which
+  installs the tarball into a scratch project and checks the `exports` map, both `.d.ts` trees
+  and the `js-slim` bin (including exit code 97).
+
+### Writing the wiki pages
+
+The committed pages are rendered (not copied) because FitNesse needs absolute paths:
+`scripts/render-fitnesse.mjs` replaces the literal token `$PWD` with the repository root.
+
+```
+|import|
+|$PWD/fitnesse/fixtures|
+```
+
+FitNesse's own conventions bit us twice, so they are worth stating:
+
+- **FitNesse appends the SLiM port to `COMMAND_PATTERN` as the final argument.** The pattern must
+  therefore *not* contain a port placeholder: `%p` is FitNesse's **classpath** placeholder (a Java
+  convention) and is replaced with the literal string `defaultPath` when the classpath is empty.
+  The suite uses `!define COMMAND_PATTERN {node $PWD/dist/esm/cli.js}` plus
+  `!define SLIM_PORT {9123}`, and omits `SLIM_PORT` on the pipe-mode page where FitNesse appends
+  `1` and the CLI switches to stdin/stdout.
+- **Script-table action rows alternate method and argument cells**, so `|add|4|5|` calls
+  `add5(4)`. A call with more than one positional argument ends the method name with `;`:
+  `|add;|4|5|`.
+- **CamelCase fixture names are auto-linked as WikiWords**, which injects a "create page" anchor
+  into the cell (and then into the class name). Escape them: `|script|!-TypedCalculator-!|`.
+
+`scripts/run-fitnesse.mjs` decides pass/fail from the per-instruction `<status>` values in the
+result XML — FitNesse's `<finalCounts>` there does not agree with the counts it prints — and also
+requires the fixture's `console.log` marker to arrive through the output tunnel, so a run cannot
+pass by silently corrupting the protocol stream.
 
 ## Steps
 
@@ -411,7 +442,7 @@ The committed wiki page defines `!define TEST_SYSTEM {slim}`,
 - [x] 10. Server session loop + error serialization + timeout + tests.
 - [x] 11. CLI + bin + exit codes.
 - [x] 12. Typed authoring API (`slimFixture`, `slimMethod`, `fixture`, `defineFixture`) + examples.
-- [ ] 13. GitHub Actions CI (quality matrix, e2e, pack).
+- [x] 13. GitHub Actions CI (quality matrix, e2e, pack).
 - [ ] 14. README + docs: `COMMAND_PATTERN`, TS/JS fixture examples, conversion table, protocol notes.
 
 ## Verification

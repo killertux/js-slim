@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Pinned so the acceptance suite always runs against a known FitNesse release.
+  FITNESSE_VERSION: "20241026"
+  FITNESSE_JAR: ${{ github.workspace }}/.fitnesse/fitnesse-standalone.jar
+
+jobs:
+  quality:
+    name: quality (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20.x", "22.x", "24.x"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Use Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      # `test/cli-bin.test.ts` runs the built CLI and skips a stale build, so
+      # build before the test run.
+      - run: pnpm build
+      - run: pnpm coverage
+
+      - name: Upload coverage
+        if: matrix.node == '22.x'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7
+
+  e2e:
+    name: e2e (FitNesse + built CLI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: pnpm
+
+      - name: Set up Temurin JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Cache the pinned FitNesse jar
+        id: fitnesse-cache
+        uses: actions/cache@v4
+        with:
+          path: .fitnesse
+          key: fitnesse-${{ env.FITNESSE_VERSION }}
+
+      - name: Download FitNesse
+        if: steps.fitnesse-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p .fitnesse
+          curl -sSL --fail --retry 3 -o "${FITNESSE_JAR}" \
+            "https://repo1.maven.org/maven2/org/fitnesse/fitnesse/${FITNESSE_VERSION}/fitnesse-${FITNESSE_VERSION}-standalone.jar"
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      # Runs the committed wiki suite (fitnesse/FitNesseRoot) against the built
+      # CLI over both transports: TCP (`SLIM_PORT`) and stdin/stdout pipe mode.
+      - name: Run the FitNesse acceptance suite
+        run: pnpm test:e2e
+
+      - name: Upload FitNesse results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fitnesse-results
+          path: fitnesse/build/FitNesseRoot/files/testResults/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  pack:
+    name: pack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      # Validates the published file list, the `exports` map and the bin.
+      - run: pnpm pack
+      - run: npm publish --dry-run
+      - run: node scripts/verify-package.mjs

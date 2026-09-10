@@ -12,6 +12,7 @@ coverage/
 .eslintcache
 
 # FitNesse e2e artifacts
+fitnesse/build/
 fitnesse-standalone.jar
 *.jar
 fitnesse/FitNesseRoot/**/ErrorLogs/

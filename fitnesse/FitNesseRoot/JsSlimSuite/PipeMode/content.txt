@@ -1,0 +1,30 @@
+!define TEST_SYSTEM {slim}
+
+!> With no `SLIM_PORT`, FitNesse appends `1`, which selects the CLI's stdin/stdout pipe mode.
+
+!define COMMAND_PATTERN {node $PWD/dist/esm/cli.js}
+
+!2 Pipe mode (port 1)
+
+The same fixture over FitNesse's stdin/stdout pipe transport instead of a TCP socket.
+
+|import|
+|$PWD/fitnesse/fixtures|
+
+|script|Calculator|
+|reset|
+|add;|4|5|
+|check|total|9|
+
+!3 Fixture output is tunneled
+
+In pipe mode `console.log` from the fixture must arrive as a `SOUT.:` record (the marker below is
+asserted by `scripts/run-fitnesse.mjs`), never as raw bytes on the protocol stream.
+
+|script|Calculator|
+|shout|
+|check|total|0|
+
+|script|!-TypedCalculator-!|
+|sum of|2,3|
+|check|total|5|
