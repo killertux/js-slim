@@ -13,11 +13,16 @@ coverage/
 
 # FitNesse e2e artifacts
 fitnesse-standalone.jar
-FitNesseRoot/**/ErrorLogs/
 *.jar
+fitnesse/FitNesseRoot/**/ErrorLogs/
+fitnesse/FitNesseRoot/files/
+fitnesse/FitNesseRoot/PageHistory/
+fitnesse/FitNesseRoot/properties.xml
+.fitnesse/
 
 # Logs & OS cruft
 *.log
+*.tsbuildinfo
 .DS_Store
 Thumbs.db
 

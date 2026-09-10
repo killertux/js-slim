@@ -1,3 +1,5 @@
 import { rmSync } from "node:fs";
 
-rmSync("dist", { recursive: true, force: true });
+for (const dir of ["dist", "coverage"]) {
+  rmSync(dir, { recursive: true, force: true });
+}
