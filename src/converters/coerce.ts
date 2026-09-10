@@ -3,16 +3,17 @@ import type { SlimSerializable, SlimValue } from "../protocol/types.js";
 import { formatDate } from "./date.js";
 import { formatHashTable } from "./map.js";
 import { defaultConverterRegistry, type ConverterRegistry } from "./registry.js";
+import { isListType, slimTypeName, type SlimType } from "./slim-type.js";
 import { smartCoerce } from "./smart.js";
-import type { SlimType } from "./types.js";
 import { VOID_TAG } from "./void.js";
 
 /**
  * Convert a decoded argument for a fixture.
  *
  * With a declared {@link SlimType} the matching converter is used (and a
- * missing converter raises `NO_CONVERTER_FOR_ARGUMENT_NUMBER`). Without one the
- * argument is smart-coerced (see {@link smartCoerce}).
+ * missing converter raises `NO_CONVERTER_FOR_ARGUMENT_NUMBER`). A
+ * {@link listOf} descriptor also converts each element. Without a declared type
+ * the argument is smart-coerced (see {@link smartCoerce}).
  */
 export function coerceValue(
   value: SlimValue,
@@ -23,12 +24,21 @@ export function coerceValue(
     return smartCoerce(value);
   }
 
+  if (isListType(type)) {
+    const converter = registry.get<SlimValue[]>(Array);
+    if (converter === undefined) {
+      throw noConverterError("list");
+    }
+    const list = converter.fromSlim(value);
+    if (list === null) {
+      return null;
+    }
+    return list.map((item) => coerceValue(item, type.element, registry));
+  }
+
   const converter = registry.get(type);
   if (converter === undefined) {
-    throw new SlimError(
-      formatSlimMessage(`${slimTypeName(type)}.`, SLIM_ERROR.NO_CONVERTER_FOR_ARGUMENT_NUMBER),
-      { tag: SLIM_ERROR.NO_CONVERTER_FOR_ARGUMENT_NUMBER },
-    );
+    throw noConverterError(slimTypeName(type));
   }
   return converter.fromSlim(value);
 }
@@ -78,7 +88,8 @@ export function toSlimValue(
     return String(value);
   }
   if (Array.isArray(value)) {
-    return value.map((item) => toSlimValue(item, undefined, registry));
+    const element = isListType(type) ? type.element : undefined;
+    return value.map((item) => toSlimValue(item, element, registry));
   }
   if (type !== undefined && type !== null) {
     const rendered = registry.get(type)?.toSlim(value as never);
@@ -95,7 +106,10 @@ export function toSlimValue(
   return String(value);
 }
 
-/** Human-readable name for a `SlimType`, used in error messages. */
-function slimTypeName(type: SlimType): string {
-  return typeof type === "string" ? type : type.name;
+/** Build the `NO_CONVERTER_FOR_ARGUMENT_NUMBER` error for a type name. */
+function noConverterError(typeName: string): SlimError {
+  return new SlimError(
+    formatSlimMessage(`${typeName}.`, SLIM_ERROR.NO_CONVERTER_FOR_ARGUMENT_NUMBER),
+    { tag: SLIM_ERROR.NO_CONVERTER_FOR_ARGUMENT_NUMBER },
+  );
 }

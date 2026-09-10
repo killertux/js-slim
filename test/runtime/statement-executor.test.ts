@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import { defaultConverterRegistry } from "../../src/converters/registry.js";
+import { listOf } from "../../src/converters/slim-type.js";
+import type { Converter } from "../../src/converters/types.js";
+import { defineFixture } from "../../src/fixture.js";
 import { VOID_TAG } from "../../src/converters/void.js";
 import { StopTestError } from "../../src/errors.js";
 import { parseInstruction } from "../../src/instructions/parse.js";
@@ -376,5 +380,183 @@ describe("StatementExecutor", () => {
     expect(results[2]).toEqual(["c1", VOID_TAG]);
     expect(results[3]).toEqual(["c2", VOID_TAG]);
     expect(results[4]).toEqual(["c3", "x"]);
+  });
+});
+
+describe("declared method metadata", () => {
+  it("converts arguments with a declared list element type", async () => {
+    class TypedFixture {
+      sumOf(values: number[]): number {
+        return values.reduce((total, value) => total + value, 0);
+      }
+    }
+    defineFixture(TypedFixture, { methods: { sumOf: { params: [listOf(Number)] } } });
+
+    const { executor, register } = setup();
+    register("TypedFixture", TypedFixture);
+
+    const rows = await run(executor, [
+      ["m1", "make", "typed", "TypedFixture"],
+      ["c1", "call", "typed", "sumOf", "1,2,3"],
+    ]);
+
+    expect(rows[1]).toEqual(["c1", "6"]);
+  });
+
+  it("keeps raw SLiM strings for an untyped list parameter", async () => {
+    class RawFixture {
+      join(values: string[]): string {
+        return values.join("|");
+      }
+    }
+    defineFixture(RawFixture, { methods: { join: { params: [Array] } } });
+
+    const { executor, register } = setup();
+    register("RawFixture", RawFixture);
+
+    const rows = await run(executor, [
+      ["m1", "make", "raw", "RawFixture"],
+      ["c1", "call", "raw", "join", "a,b"],
+    ]);
+
+    expect(rows[1]).toEqual(["c1", "a|b"]);
+  });
+
+  it("converts scalar arguments with declared types", async () => {
+    class ScalarFixture {
+      add(a: number, b: number): number {
+        return a + b;
+      }
+    }
+    defineFixture(ScalarFixture, { methods: { add: { params: [Number, Number] } } });
+
+    const { executor, register } = setup();
+    register("ScalarFixture", ScalarFixture);
+
+    const rows = await run(executor, [
+      ["m1", "make", "s", "ScalarFixture"],
+      ["c1", "call", "s", "add", "2", "3"],
+    ]);
+
+    expect(rows[1]).toEqual(["c1", "5"]);
+  });
+
+  it("invokes a method through its declared alias", async () => {
+    class AliasFixture {
+      sumOf(a: number, b: number): number {
+        return a + b;
+      }
+    }
+    defineFixture(AliasFixture, { methods: { sumOf: { name: "sum of" } } });
+
+    const { executor, register } = setup();
+    register("AliasFixture", AliasFixture);
+
+    const rows = await run(executor, [
+      ["m1", "make", "a", "AliasFixture"],
+      ["c1", "call", "a", "sum of", "2", "3"],
+    ]);
+
+    expect(rows[1]).toEqual(["c1", "5"]);
+  });
+
+  it("calls through a declared SUT property", async () => {
+    class Service {
+      ping(): string {
+        return "pong";
+      }
+    }
+
+    class SutFixture {
+      service = new Service();
+      sut = { ping: (): string => "conventional" };
+    }
+    defineFixture(SutFixture, { sut: "service" });
+
+    const { executor, register } = setup();
+    register("SutFixture", SutFixture);
+
+    const rows = await run(executor, [
+      ["m1", "make", "f", "SutFixture"],
+      ["c1", "call", "f", "ping"],
+    ]);
+
+    expect(rows[1]).toEqual(["c1", "pong"]);
+  });
+
+  it("calls a factory export instead of constructing it", async () => {
+    let built = 0;
+    const counterFactory = (): { increment: () => number } => {
+      built += 1;
+      let count = 0;
+      return { increment: (): number => (count += 1) };
+    };
+    defineFixture(counterFactory, { factory: true });
+
+    const { executor, register } = setup();
+    register("CounterFactory", counterFactory);
+
+    const rows = await run(executor, [
+      ["m1", "make", "c", "CounterFactory"],
+      ["c1", "call", "c", "increment"],
+      ["c2", "call", "c", "increment"],
+    ]);
+
+    expect(rows.map((row) => row[1])).toEqual(["OK", "1", "2"]);
+    expect(built).toBe(1);
+  });
+
+  it("uses the declared return type's converter when rendering", async () => {
+    class CustomDateConverter implements Converter<Date> {
+      toSlim(): string {
+        return "custom-date";
+      }
+
+      fromSlim(): Date {
+        return new Date(0);
+      }
+    }
+
+    class DateFixture {
+      today(): Date {
+        return new Date(Date.UTC(2009, 4, 5));
+      }
+    }
+    defineFixture(DateFixture, { methods: { today: { returns: Date } } });
+
+    const { executor, register } = setup();
+    register("DateFixture", DateFixture);
+
+    const previous = defaultConverterRegistry.get(Date);
+    defaultConverterRegistry.register(Date, new CustomDateConverter());
+    try {
+      const rows = await run(executor, [
+        ["m1", "make", "d", "DateFixture"],
+        ["c1", "call", "d", "today"],
+      ]);
+
+      expect(rows[1]).toEqual(["c1", "custom-date"]);
+    } finally {
+      defaultConverterRegistry.register(Date, previous as Converter<Date>);
+    }
+  });
+
+  it("reports a missing converter for a declared parameter type", async () => {
+    class UnknownFixture {
+      echo(value: string): string {
+        return value;
+      }
+    }
+    defineFixture(UnknownFixture, { methods: { echo: { params: ["nope" as never] } } });
+
+    const { executor, register } = setup();
+    register("UnknownFixture", UnknownFixture);
+
+    const rows = await run(executor, [
+      ["m1", "make", "u", "UnknownFixture"],
+      ["c1", "call", "u", "echo", "x"],
+    ]);
+
+    expect(String(rows[1]?.[1])).toContain("NO_CONVERTER_FOR_ARGUMENT_NUMBER");
   });
 });

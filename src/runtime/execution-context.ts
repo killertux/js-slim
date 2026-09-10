@@ -1,5 +1,6 @@
 import { coerceArgument } from "../converters/coerce.js";
 import { SLIM_ERROR, SlimError, formatSlimMessage } from "../errors.js";
+import { isFactoryFixture, type FixtureClass, type FixtureFactory } from "../fixture.js";
 import type { SlimValue } from "../protocol/types.js";
 import { FixtureLoader } from "./fixture-loader.js";
 import { VariableStore } from "./variable-store.js";
@@ -113,7 +114,12 @@ export class ExecutionContext {
     const constructorArgs = this.variableStore
       .replaceSymbols(args)
       .map((value) => coerceArgument(value));
-    const instance = new fixture(...(constructorArgs as never[]));
+
+    // A `factory: true` export builds its instance when called, so closures can
+    // produce fixtures; everything else is constructed.
+    const instance = isFactoryFixture(fixture)
+      ? await (fixture as FixtureFactory)(...(constructorArgs as never[]))
+      : new (fixture as FixtureClass)(...(constructorArgs as never[]));
 
     this.addToInstancesOrLibrary(instanceName, instance);
     return instance;

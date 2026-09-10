@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { coerceValue, toSlimValue } from "../../src/converters/coerce.js";
 import { ConverterRegistry } from "../../src/converters/registry.js";
+import { listOf } from "../../src/converters/slim-type.js";
 import { smartCoerce } from "../../src/converters/smart.js";
 import type { Converter } from "../../src/converters/types.js";
 import { VOID_TAG } from "../../src/converters/void.js";
@@ -127,5 +128,53 @@ describe("toSlimValue", () => {
     registry.register(Date, new MarkerDateConverter());
 
     expect(toSlimValue(new Date(Date.UTC(2009, 4, 5)), Date, registry)).toBe("custom-date");
+  });
+});
+
+describe("declared collection aliases", () => {
+  const TABLE = "<table><tr><td>a</td><td>b</td></tr></table>";
+
+  it("treats the string aliases like their constructors", () => {
+    expect(coerceValue("[1, 2]", "list")).toEqual(coerceValue("[1, 2]", Array));
+    expect(coerceValue(TABLE, "map")).toEqual(coerceValue(TABLE, Map));
+    expect(coerceValue("42", "object")).toBe(42);
+    expect(coerceValue("anything", "void")).toBeNull();
+  });
+});
+
+describe("listOf element types", () => {
+  it("converts each element with the declared element type", () => {
+    expect(coerceValue("1,2,3", listOf(Number))).toEqual([1, 2, 3]);
+    expect(coerceValue("[a, b]", listOf(String))).toEqual(["a", "b"]);
+    expect(coerceValue("true,false", listOf(Boolean))).toEqual([true, false]);
+    expect(coerceValue("05-May-2009", listOf(Date))).toEqual([new Date(Date.UTC(2009, 4, 5))]);
+  });
+
+  it("handles a decoded nested list", () => {
+    expect(coerceValue([["1", "2"], ["3"]], listOf(listOf(Number)))).toEqual([[1, 2], [3]]);
+  });
+
+  it("returns null for a blank list", () => {
+    expect(coerceValue("", listOf(Number))).toBeNull();
+  });
+
+  it("leaves an untyped list as raw SLiM strings", () => {
+    expect(coerceValue("1,2", Array)).toEqual(["1", "2"]);
+    expect(coerceValue("1,2", "list")).toEqual(["1", "2"]);
+  });
+
+  it("raises NO_CONVERTER_FOR_ARGUMENT_NUMBER when the list converter is missing", () => {
+    const registry = new ConverterRegistry();
+    registry.remove(Array);
+
+    expect(() => coerceValue("1,2", listOf(Number), registry)).toThrow(
+      /NO_CONVERTER_FOR_ARGUMENT_NUMBER/,
+    );
+  });
+
+  it("renders elements with the declared type", () => {
+    expect(toSlimValue([1, 2, 3], listOf(Number))).toEqual(["1", "2", "3"]);
+    expect(toSlimValue([new Date(Date.UTC(2009, 4, 5))], listOf(Date))).toEqual(["05-May-2009"]);
+    expect(toSlimValue([1, 2], Array)).toEqual(["1", "2"]);
   });
 });

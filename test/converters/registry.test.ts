@@ -5,6 +5,8 @@ import {
   defaultConverterRegistry,
   getConverter,
 } from "../../src/converters/registry.js";
+import type { SlimValue } from "../../src/protocol/types.js";
+import { listOf } from "../../src/converters/slim-type.js";
 import type { Converter } from "../../src/converters/types.js";
 
 class UpperConverter implements Converter<string> {
@@ -58,5 +60,37 @@ describe("ConverterRegistry", () => {
     const registry = new ConverterRegistry();
     registry.register(String, new UpperConverter());
     expect(getConverter(String, registry)).toBeInstanceOf(UpperConverter);
+  });
+});
+
+describe("collection aliases", () => {
+  it("normalises the string aliases onto their constructors", () => {
+    const registry = new ConverterRegistry();
+
+    expect(registry.get("list")).toBe(registry.get(Array));
+    expect(registry.get("map")).toBe(registry.get(Map));
+    expect(registry.get("object")).toBe(registry.get(Object));
+    expect(registry.get(listOf(Number))).toBe(registry.get(Array));
+    expect(registry.has("list")).toBe(true);
+  });
+
+  it("registers and removes through an alias", () => {
+    class UpperListConverter implements Converter<SlimValue[]> {
+      toSlim(value: SlimValue[] | null | undefined): string | null {
+        return value === null || value === undefined ? null : value.join(",").toUpperCase();
+      }
+
+      fromSlim(value: SlimValue): SlimValue[] {
+        return [String(value).toUpperCase()];
+      }
+    }
+
+    const registry = new ConverterRegistry();
+    registry.register("list", new UpperListConverter());
+
+    expect(registry.get(Array)).toBeInstanceOf(UpperListConverter);
+
+    registry.remove("list");
+    expect(registry.has(Array)).toBe(false);
   });
 });

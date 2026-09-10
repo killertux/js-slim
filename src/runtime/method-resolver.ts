@@ -1,4 +1,10 @@
 import { SLIM_ERROR, SlimError, formatSlimMessage } from "../errors.js";
+import {
+  declaredFixtureName,
+  declaredSutName,
+  getFixtureMethodMeta,
+  getOwnMethodMeta,
+} from "../fixture.js";
 import { swapCaseOfFirstLetter } from "./fixture-loader.js";
 
 /** A callable fixture method. */
@@ -53,24 +59,8 @@ export function findMethodOn(
  * and only data (non-accessor) function properties are listed.
  */
 export function listMethods(target: object): MethodInfo[] {
-  const found = new Map<string, number>();
-  let current: object | null = target;
-
-  while (current !== null && current !== Object.prototype) {
-    for (const name of Object.getOwnPropertyNames(current)) {
-      if (name === "constructor" || found.has(name)) {
-        continue;
-      }
-      const descriptor = Object.getOwnPropertyDescriptor(current, name);
-      if (descriptor !== undefined && typeof descriptor.value === "function") {
-        found.set(name, (descriptor.value as FixtureMethod).length);
-      }
-    }
-    current = Object.getPrototypeOf(current) as object | null;
-  }
-
-  return [...found.entries()]
-    .map(([name, arity]) => ({ name, arity }))
+  return functionNames(target)
+    .map((name) => ({ name, arity: (lookupFunction(target, name) as FixtureMethod).length }))
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
@@ -86,11 +76,19 @@ export async function invokeMethod(match: MethodMatch, args: readonly unknown[])
   return await match.method.call(match.receiver, ...args);
 }
 
-/** Find the System Under Test of an object via its `sut`/`systemUnderTest` property. */
+/** Find the System Under Test of an object via its declared or conventional property. */
 export function findSystemUnderTest(
   target: object,
   names: readonly string[] = DEFAULT_SUT_NAMES,
 ): unknown {
+  // An explicitly declared SUT property wins outright: it is the author saying
+  // which property holds the SUT, so the heuristic must not override it.
+  const declared = declaredSutName(target);
+  if (declared !== undefined) {
+    const value = readProperty(target, declared);
+    return isObjectLike(value) ? value : undefined;
+  }
+
   for (const name of names) {
     const value = readProperty(target, name);
     if (isObjectLike(value)) {
@@ -206,7 +204,56 @@ function findMethod(
       return { name, method };
     }
   }
+
+  return findMethodByDeclaredName(target, methodName, accepts);
+}
+
+/**
+ * Find a method by its declared wire name (`MethodMeta.name`).
+ *
+ * Lets a FitNesse-facing name differ from the JavaScript one — for example
+ * `"sum of"` for `sumOf` — whether the alias is declared with `slimMethod` on
+ * the function or through `FixtureMeta.methods`.
+ */
+function findMethodByDeclaredName(
+  target: object,
+  wireName: string,
+  accepts: (method: FixtureMethod) => boolean,
+): { name: string; method: FixtureMethod } | undefined {
+  for (const name of functionNames(target)) {
+    const method = lookupFunction(target, name);
+    if (method === undefined || !accepts(method)) {
+      continue;
+    }
+    const declared = getOwnMethodMeta(method)?.name ?? getFixtureMethodMeta(target, name)?.name;
+    if (declared === wireName) {
+      return { name, method };
+    }
+  }
   return undefined;
+}
+
+/** Own and inherited data-property function names (excluding `constructor`). */
+function functionNames(target: object): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let current: object | null = target;
+
+  while (current !== null && current !== Object.prototype) {
+    for (const name of Object.getOwnPropertyNames(current)) {
+      if (name === "constructor" || seen.has(name)) {
+        continue;
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(current, name);
+      if (descriptor !== undefined && typeof descriptor.value === "function") {
+        seen.add(name);
+        names.push(name);
+      }
+    }
+    current = Object.getPrototypeOf(current) as object | null;
+  }
+
+  return names;
 }
 
 /**
@@ -257,6 +304,11 @@ function readProperty(target: object, name: string): unknown {
 }
 
 function constructorName(target: object): string {
+  const declared = declaredFixtureName(target);
+  if (declared !== undefined) {
+    return declared;
+  }
+
   try {
     const constructor = (target as { constructor?: unknown }).constructor;
     if (typeof constructor === "function" && constructor.name.length > 0) {

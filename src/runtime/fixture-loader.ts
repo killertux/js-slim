@@ -3,12 +3,13 @@ import { basename, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { SLIM_ERROR, SlimError, formatSlimMessage } from "../errors.js";
+import { declaredFixtureName, type FixtureExport } from "../fixture.js";
 
 /**
- * A loadable fixture: any function (class or constructor function) that the
- * executor can `new`. Parameter types are checked at call time (step 9).
+ * A loadable fixture: a class the executor can `new`, or — when the export
+ * declares `factory: true` — a function it calls instead.
  */
-export type FixtureConstructor = new (...args: never[]) => unknown;
+export type FixtureConstructor = FixtureExport;
 
 /** Hook tried before filesystem/package resolution (e.g. an explicit registry). */
 export type FixtureResolver = (className: string) => FixtureConstructor | null | undefined;
@@ -67,6 +68,11 @@ interface Candidate {
   /** Filesystem path to check first, or `null` for package specifiers. */
   readonly filePath: string | null;
   readonly exportPath: readonly string[];
+  /**
+   * When set, the module is accepted if it exports a function declaring this
+   * fixture name (see `FixtureMeta.name`) instead of by export path.
+   */
+  readonly declaredName?: string;
 }
 
 /**
@@ -185,7 +191,7 @@ export class FixtureLoader {
     const candidates: Candidate[] = [];
 
     const push = (candidate: Candidate): void => {
-      const key = `${candidate.specifier}\u0000${JSON.stringify(candidate.exportPath)}`;
+      const key = `${candidate.specifier}\u0000${JSON.stringify(candidate.exportPath)}\u0000${candidate.declaredName ?? ""}`;
       if (!seen.has(key)) {
         seen.add(key);
         candidates.push(candidate);
@@ -194,6 +200,16 @@ export class FixtureLoader {
 
     const file = (path: string, exportPath: readonly string[]): void => {
       push({ specifier: pathToFileURL(path).href, filePath: path, exportPath });
+    };
+
+    /** Accept the module when an export declares this fixture name. */
+    const declared = (path: string): void => {
+      push({
+        specifier: pathToFileURL(path).href,
+        filePath: path,
+        exportPath: [],
+        declaredName: className,
+      });
     };
 
     if (!isFileSystemPath(root)) {
@@ -211,12 +227,14 @@ export class FixtureLoader {
     file(base, ["default", ...segments]);
     if (isNameDerived(base, className)) {
       file(base, []);
+      declared(base);
     }
     for (const extension of this.extensions) {
       file(`${base}${extension}`, segments);
       file(`${base}${extension}`, ["default", ...segments]);
       if (isNameDerived(`${base}${extension}`, className)) {
         file(`${base}${extension}`, []);
+        declared(`${base}${extension}`);
       }
     }
 
@@ -226,12 +244,14 @@ export class FixtureLoader {
       file(nested, []);
       file(nested, segments);
       file(nested, ["default", ...segments]);
+      declared(nested);
 
       if (segments.length > 1) {
         const flattened = `${join(base, segments.join("."))}${extension}`;
         file(flattened, []);
         file(flattened, segments);
         file(flattened, ["default", ...segments]);
+        declared(flattened);
       }
     }
 
@@ -262,6 +282,10 @@ export class FixtureLoader {
       return undefined;
     }
 
+    if (candidate.declaredName !== undefined) {
+      return findDeclaredExport(namespace, candidate.declaredName);
+    }
+
     const value = resolveExport(namespace, candidate.exportPath);
     return typeof value === "function" ? (value as FixtureConstructor) : undefined;
   }
@@ -290,6 +314,22 @@ export function swapCaseOfFirstLetter(value: string): string {
   const swapped = first === first.toLowerCase() ? first.toUpperCase() : first.toLowerCase();
   // Mirror Java's char-based swap: never change the string's length.
   return swapped.length === 1 ? `${swapped}${value.slice(1)}` : value;
+}
+
+/**
+ * Find an export whose declared fixture name matches (see `FixtureMeta.name`).
+ */
+function findDeclaredExport(namespace: unknown, name: string): FixtureConstructor | undefined {
+  if (namespace === null || typeof namespace !== "object") {
+    return undefined;
+  }
+
+  for (const value of Object.values(namespace as Record<string, unknown>)) {
+    if (typeof value === "function" && declaredFixtureName(value) === name) {
+      return value as FixtureConstructor;
+    }
+  }
+  return undefined;
 }
 
 function resolveExport(namespace: unknown, exportPath: readonly string[]): unknown {
