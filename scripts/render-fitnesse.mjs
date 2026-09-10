@@ -12,8 +12,8 @@
  * ```
  */
 
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** The token that stands for the absolute repository path. */
@@ -25,6 +25,31 @@ export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /** Where rendering writes by default. */
 export const DEFAULT_OUT = join(REPO_ROOT, "fitnesse", "build", "FitNesseRoot");
 
+/** Extensions rendered as text; anything else is copied byte for byte. */
+const TEXT_EXTENSIONS = new Set([".txt", ".xml", ".properties", ".md", ".csv", ".html"]);
+
+/**
+ * Refuse to render into a path whose deletion would destroy something.
+ *
+ * Rendering starts with `rm -rf <out>`, so `--out .` or a typo must not be able
+ * to delete the checkout: reject a filesystem root and anything that is, or
+ * contains, the repository or the template source.
+ */
+export function assertSafeOut(out, options = {}) {
+  const source = resolve(options.source ?? join(REPO_ROOT, "fitnesse", "FitNesseRoot"));
+  const repoRoot = resolve(options.repoRoot ?? REPO_ROOT);
+  const target = resolve(out);
+
+  if (dirname(target) === target) {
+    throw new Error(`Refusing to render into a filesystem root: ${out}`);
+  }
+  for (const root of [repoRoot, source]) {
+    if (target === root || root.startsWith(target + sep)) {
+      throw new Error(`Refusing to render into ${out}: it would delete ${root}`);
+    }
+  }
+}
+
 /**
  * Render a wiki root.
  *
@@ -35,6 +60,8 @@ export async function renderWikiRoot(options = {}) {
   const source = options.source ?? join(REPO_ROOT, "fitnesse", "FitNesseRoot");
   const out = options.out ?? DEFAULT_OUT;
   const repoRoot = options.repoRoot ?? REPO_ROOT;
+
+  assertSafeOut(out, { source, repoRoot });
 
   // A stale rendered root would silently run an old page, so start clean.
   await rm(out, { recursive: true, force: true });
@@ -57,8 +84,20 @@ async function renderDirectory(source, out, repoRoot) {
       continue;
     }
 
+    if (!TEXT_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
+      // Not a template: copy it unchanged so a binary asset cannot be mangled.
+      await copyFile(from, to);
+      rendered.push(to);
+      continue;
+    }
+
     const text = await readFile(from, "utf8");
-    await writeFile(to, text.replaceAll(REPO_ROOT_TOKEN, repoRoot), "utf8");
+    // A function replacer, so `$&`/`$$` in a checkout path is taken literally.
+    await writeFile(
+      to,
+      text.replaceAll(REPO_ROOT_TOKEN, () => repoRoot),
+      "utf8",
+    );
     rendered.push(to);
   }
 

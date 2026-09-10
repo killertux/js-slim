@@ -12,7 +12,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -67,11 +67,16 @@ function main() {
     check("CJS build is present", existsSync(join(installed, "dist", "cjs", "index.js")));
     check("ESM types are present", existsSync(join(installed, "dist", "esm", "index.d.ts")));
     check("CJS types are present", existsSync(join(installed, "dist", "cjs", "index.d.ts")));
-    check("entry points are executable", existsSync(join(installed, "dist", "esm", "cli.js")));
+    check("the CLI ships in the ESM build", existsSync(join(installed, "dist", "esm", "cli.js")));
     check(
       "the CJS build has no CLI (ESM-only bin)",
       !existsSync(join(installed, "dist", "cjs", "cli.js")),
     );
+
+    // The version in `src/index.ts` must match the published `package.json`.
+    const installedVersion = JSON.parse(
+      readFileSync(join(installed, "package.json"), "utf8"),
+    ).version;
 
     // CJS consumers
     const cjs = run(
@@ -79,11 +84,20 @@ function main() {
       [
         "-e",
         `const m = require(${JSON.stringify(PACKAGE_NAME)});
-         console.log([typeof m.SlimServer, typeof m.serialize, typeof m.slimFixture, typeof m.listOf, m.VERSION].join(" "));`,
+         console.log(JSON.stringify({
+           api: [typeof m.SlimServer, typeof m.serialize, typeof m.slimFixture, typeof m.listOf],
+           version: m.VERSION,
+         }));`,
       ],
       { cwd: scratch },
     ).trim();
-    check("require() exposes the API", cjs === "function function function function 0.1.0", cjs);
+    const cjsResult = JSON.parse(cjs);
+    check(
+      "require() exposes the API",
+      cjsResult.api.every((entry) => entry === "function"),
+      cjs,
+    );
+    check("VERSION matches package.json", cjsResult.version === installedVersion, cjs);
 
     // ESM consumers
     const esm = run(

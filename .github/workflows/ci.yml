@@ -14,14 +14,17 @@ permissions:
   contents: read
 
 env:
-  # Pinned so the acceptance suite always runs against a known FitNesse release.
+  # Pinned so the acceptance suite always runs against a known FitNesse release,
+  # and verified by digest so a swapped artifact cannot pass unnoticed.
   FITNESSE_VERSION: "20241026"
+  FITNESSE_SHA256: "9f5bdb4156656c73392141d0a5e7a95499f8840e500d0c461d87fe8935796b6f"
   FITNESSE_JAR: ${{ github.workspace }}/.fitnesse/fitnesse-standalone.jar
 
 jobs:
   quality:
     name: quality (node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -58,6 +61,7 @@ jobs:
   e2e:
     name: e2e (FitNesse + built CLI)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -90,6 +94,11 @@ jobs:
           curl -sSL --fail --retry 3 -o "${FITNESSE_JAR}" \
             "https://repo1.maven.org/maven2/org/fitnesse/fitnesse/${FITNESSE_VERSION}/fitnesse-${FITNESSE_VERSION}-standalone.jar"
 
+      # A restored cache could be stale or truncated, so verify the digest on
+      # every run rather than only after a download.
+      - name: Verify the FitNesse jar
+        run: echo "${FITNESSE_SHA256}  ${FITNESSE_JAR}" | sha256sum --check --strict
+
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
@@ -110,6 +119,7 @@ jobs:
   pack:
     name: pack
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 

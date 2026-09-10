@@ -416,7 +416,9 @@ FitNesse's own conventions bit us twice, so they are worth stating:
   convention) and is replaced with the literal string `defaultPath` when the classpath is empty.
   The suite uses `!define COMMAND_PATTERN {node $PWD/dist/esm/cli.js}` plus
   `!define SLIM_PORT {9123}`, and omits `SLIM_PORT` on the pipe-mode page where FitNesse appends
-  `1` and the CLI switches to stdin/stdout.
+  `1` and the CLI switches to stdin/stdout. Keep the FitNesse web port clear of the SLiM range:
+  FitNesse hands the *n*th TCP test page `SLIM_PORT + n`, so a web port of 9124 would collide with
+  a second TCP page (the runner therefore defaults to 9200).
 - **Script-table action rows alternate method and argument cells**, so `|add|4|5|` calls
   `add5(4)`. A call with more than one positional argument ends the method name with `;`:
   `|add;|4|5|`.
@@ -452,8 +454,8 @@ pass by silently corrupting the protocol stream.
 - Codec matches Java golden vectors incl. surrogate pairs and >6-digit lengths.
 - `SlimClient` ↔ server over a real socket passes the ported ListExecutor/StatementExecutor scenarios.
 - `node dist/esm/cli.js` from a JS fixture: manual script/decision table run.
-- Real FitNesse: `COMMAND_PATTERN {node <abs>/dist/cli.js %p}` runs the committed suite; automated
-  in the CI `e2e` job.
+- Real FitNesse: `COMMAND_PATTERN {node <abs>/dist/cli.js}` (FitNesse appends the SLiM port itself)
+  runs the committed suite; automated in the CI `e2e` job.
 
 ## Risks / notes
 
@@ -461,7 +463,8 @@ pass by silently corrupting the protocol stream.
   and test both explicitly.
 - **tsc dual build**: relative imports need `.js`; Vitest may need a `.js`→`.ts` resolve alias —
   configured in step 1 if required.
-- **TS fixtures at runtime**: document `node --import tsx dist/cli.js %p` and the precompile path.
+- **TS fixtures at runtime**: document `COMMAND_PATTERN {node --import tsx <abs>/dist/cli.js}`
+  (FitNesse appends the port) and the precompile path.
 - **Stdio mode** must fully capture `console.*` + `process.stdout.write` or the protocol stream is
   corrupted; keep the redirect scoped and always restore.
 - **Smart coercion** can surprise string fixtures (`"007"`); documented, configurable, and

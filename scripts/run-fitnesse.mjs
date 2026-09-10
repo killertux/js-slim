@@ -24,11 +24,26 @@ import { DEFAULT_OUT, REPO_ROOT, renderWikiRoot } from "./render-fitnesse.mjs";
 
 /** The suite page that runs every test page. */
 export const DEFAULT_PAGE = "JsSlimSuite?suite";
-/** The FitNesse web port; the SLiM port is chosen by the page (`SLIM_PORT`). */
-export const DEFAULT_FITNESSE_PORT = 9124;
+/**
+ * The FitNesse web port. Kept clear of the SLiM ports: FitNesse hands a page
+ * `SLIM_PORT + n` for the nth TCP test page (so 9123, 9124, ...), which would
+ * collide with a web port in that range.
+ */
+export const DEFAULT_FITNESSE_PORT = 9200;
+/**
+ * Test pages the suite must run. A page that stops running is a failure, not a
+ * smaller run: the assertion floor alone would still be met by one page.
+ */
+export const DEFAULT_EXPECTED_PAGES = ["JsSlimSuite.SmokeTest", "JsSlimSuite.PipeMode"];
+/**
+ * The page whose fixture output must arrive through the pipe-mode tunnel.
+ * Only stdin/stdout mode patches process output, so this is the transport that
+ * proves the `SOUT.:` tunnel carries fixture writes.
+ */
+export const TUNNEL_MARKER_PAGE = "JsSlimSuite.PipeMode";
 /** Written by the `Calculator.shout` fixture through the output tunnel. */
 export const TUNNEL_MARKER = "js-slim-e2e-tunnel-marker";
-/** Fail if fewer assertions than this pass, so "nothing ran" cannot look green. */
+/** Secondary floor: fail if fewer assertions than this pass. */
 export const DEFAULT_MINIMUM_ASSERTIONS = 10;
 
 /** Decode the XML entities FitNesse writes into result files. */
@@ -74,6 +89,7 @@ export function parseResultsXml(xml) {
       pass: countStatus("pass"),
       fail: countStatus("fail"),
       error: countStatus("error"),
+      ignore: countStatus("ignore"),
       assertions: (block.match(/<instructionResult>/g) ?? []).length,
     });
   }
@@ -85,12 +101,16 @@ export function parseResultsXml(xml) {
  * Decide whether a run passed.
  *
  * @param {{ pages: ReturnType<typeof parseResultsXml>, fitNesseExitCode: number,
- *   marker?: string | null, minimumAssertions?: number }} run
- * @returns {{ totals: { pass: number, fail: number, error: number }, problems: string[] }}
+ *   marker?: string | null, markerPage?: string, expectedPages?: readonly string[],
+ *   minimumAssertions?: number }} run
+ * @returns {{ totals: { pass: number, fail: number, error: number, ignore: number },
+ *   problems: string[] }}
  */
 export function evaluateRun(run) {
   const { pages, fitNesseExitCode } = run;
   const marker = run.marker === undefined ? TUNNEL_MARKER : run.marker;
+  const markerPage = run.markerPage ?? TUNNEL_MARKER_PAGE;
+  const expectedPages = run.expectedPages ?? DEFAULT_EXPECTED_PAGES;
   const minimumAssertions = run.minimumAssertions ?? DEFAULT_MINIMUM_ASSERTIONS;
   const problems = [];
 
@@ -99,8 +119,9 @@ export function evaluateRun(run) {
       pass: accumulated.pass + page.pass,
       fail: accumulated.fail + page.fail,
       error: accumulated.error + page.error,
+      ignore: accumulated.ignore + page.ignore,
     }),
-    { pass: 0, fail: 0, error: 0 },
+    { pass: 0, fail: 0, error: 0, ignore: 0 },
   );
 
   if (pages.length === 0) {
@@ -108,6 +129,11 @@ export function evaluateRun(run) {
   }
   if (fitNesseExitCode !== 0) {
     problems.push(`FitNesse exited with code ${fitNesseExitCode}`);
+  }
+  for (const expected of expectedPages) {
+    if (!pages.some((page) => page.rootPath === expected)) {
+      problems.push(`expected page ${expected} did not run`);
+    }
   }
   if (totals.pass < minimumAssertions) {
     problems.push(
@@ -120,8 +146,16 @@ export function evaluateRun(run) {
   if (totals.error > 0) {
     problems.push(`${totals.error} assertion(s) raised an exception`);
   }
-  if (marker !== null && !pages.some((page) => page.stdOut.includes(marker))) {
-    problems.push(`tunneled fixture output (${marker}) never reached FitNesse`);
+  if (totals.ignore > 0) {
+    problems.push(`${totals.ignore} assertion(s) were ignored`);
+  }
+  if (marker !== null) {
+    const page = pages.find((candidate) => candidate.rootPath === markerPage);
+    if (page !== undefined && !page.stdOut.includes(marker)) {
+      problems.push(
+        `pipe-mode fixture output (${marker}) never reached FitNesse for ${markerPage}`,
+      );
+    }
   }
 
   return { totals, problems };
@@ -149,7 +183,8 @@ async function readResultFiles(resultsDir) {
  * Render the wiki root and run FitNesse.
  *
  * @param {{ jar: string, java?: string, page?: string, port?: number, out?: string,
- *   minimumAssertions?: number, marker?: string | null, log?: (line: string) => void }} options
+ *   minimumAssertions?: number, marker?: string | null, markerPage?: string,
+ *   expectedPages?: readonly string[], log?: (line: string) => void }} options
  */
 export async function runFitnesse(options) {
   const jar = options.jar;
@@ -211,12 +246,23 @@ export async function runFitnesse(options) {
     pages,
     fitNesseExitCode: code,
     ...(options.marker === undefined ? {} : { marker: options.marker }),
+    ...(options.markerPage === undefined ? {} : { markerPage: options.markerPage }),
+    ...(options.expectedPages === undefined ? {} : { expectedPages: options.expectedPages }),
     ...(options.minimumAssertions === undefined
       ? {}
       : { minimumAssertions: options.minimumAssertions }),
   });
 
   return { pages, totals, problems, exitCode: code, output };
+}
+
+/** Parse a positive, bounded integer flag value. */
+function positiveInteger(name, value) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65535) {
+    throw new Error(`Invalid value for ${name}: ${value}`);
+  }
+  return parsed;
 }
 
 /** Parse `--flag value` style arguments. */
@@ -226,28 +272,31 @@ export function parseArguments(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const name = argv[index];
     const value = argv[index + 1];
-    if (value === undefined) {
-      throw new Error(`Missing value for ${name}`);
-    }
+    const required = () => {
+      if (value === undefined) {
+        throw new Error(`Missing value for ${name}`);
+      }
+      return value;
+    };
 
     switch (name) {
       case "--jar":
-        options.jar = value;
+        options.jar = required();
         break;
       case "--java":
-        options.java = value;
+        options.java = required();
         break;
       case "--page":
-        options.page = value;
-        break;
-      case "--port":
-        options.port = Number(value);
+        options.page = required();
         break;
       case "--out":
-        options.out = value;
+        options.out = required();
+        break;
+      case "--port":
+        options.port = positiveInteger(name, required());
         break;
       case "--minimum-assertions":
-        options.minimumAssertions = Number(value);
+        options.minimumAssertions = positiveInteger(name, required());
         break;
       default:
         throw new Error(`Unknown option: ${name}`);

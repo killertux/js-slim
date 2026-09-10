@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_EXPECTED_PAGES,
   DEFAULT_MINIMUM_ASSERTIONS,
   TUNNEL_MARKER,
+  TUNNEL_MARKER_PAGE,
   evaluateRun,
   parseArguments,
   parseResultsXml,
@@ -40,9 +42,18 @@ ${expectations}
 </testResults>`;
 }
 
+/** A page that satisfies the default expectations: enough passes plus the marker. */
+function passingPage(rootPath = TUNNEL_MARKER_PAGE): string {
+  return resultXml({
+    rootPath,
+    statuses: Array(12).fill("pass"),
+    stdOut: TUNNEL_MARKER,
+  });
+}
+
 describe("parseResultsXml", () => {
   it("counts assertion statuses per page", () => {
-    const xml = resultXml({ statuses: ["pass", "pass", "fail", "error"] });
+    const xml = resultXml({ statuses: ["pass", "pass", "fail", "error", "ignore"] });
 
     expect(parseResultsXml(xml)).toEqual([
       {
@@ -53,7 +64,8 @@ describe("parseResultsXml", () => {
         pass: 2,
         fail: 1,
         error: 1,
-        assertions: 4,
+        ignore: 1,
+        assertions: 5,
       },
     ]);
   });
@@ -77,61 +89,92 @@ describe("parseResultsXml", () => {
 });
 
 describe("evaluateRun", () => {
-  const green = parseResultsXml(
-    resultXml({ statuses: Array(12).fill("pass"), stdOut: TUNNEL_MARKER }),
-  );
+  const singlePage = { expectedPages: ["Suite.Page"] };
 
   it("accepts a green run", () => {
-    const { totals, problems } = evaluateRun({ pages: green, fitNesseExitCode: 0 });
+    const pages = parseResultsXml(passingPage("Suite.Page"));
+    const { totals, problems } = evaluateRun({ pages, fitNesseExitCode: 0, ...singlePage });
 
     expect(problems).toEqual([]);
-    expect(totals).toEqual({ pass: 12, fail: 0, error: 0 });
+    expect(totals).toEqual({ pass: 12, fail: 0, error: 0, ignore: 0 });
   });
 
-  it("reports failures and exceptions", () => {
+  it("accepts a green run against the default expectations", () => {
+    const pages = parseResultsXml(DEFAULT_EXPECTED_PAGES.map((page) => passingPage(page)).join(""));
+
+    const { problems } = evaluateRun({ pages, fitNesseExitCode: 0 });
+
+    expect(problems).toEqual([]);
+  });
+
+  it("reports failures, exceptions and ignores", () => {
     const pages = parseResultsXml(
-      resultXml({ statuses: ["pass", "fail", "error"], stdOut: TUNNEL_MARKER }),
+      resultXml({ rootPath: "Suite.Page", statuses: ["pass", "fail", "error", "ignore"] }),
     );
 
-    const { problems } = evaluateRun({ pages, fitNesseExitCode: 2 });
+    const { problems } = evaluateRun({ pages, fitNesseExitCode: 2, ...singlePage });
 
     expect(problems).toEqual([
       "FitNesse exited with code 2",
       "only 1 assertion(s) passed; expected at least 10",
       "1 assertion(s) failed",
       "1 assertion(s) raised an exception",
+      "1 assertion(s) were ignored",
     ]);
   });
 
-  it("fails when nothing ran, so an empty run cannot look green", () => {
-    const { problems } = evaluateRun({
-      pages: parseResultsXml(""),
-      fitNesseExitCode: 0,
-      minimumAssertions: 2,
-    });
-
-    expect(problems).toContain("FitNesse produced no test results");
-    expect(problems).toContain("only 0 assertion(s) passed; expected at least 2");
-  });
-
-  it("fails when the tunneled fixture output never arrived", () => {
-    const pages = parseResultsXml(resultXml({ statuses: Array(12).fill("pass") }));
+  // The regression this guards: one page alone clears the assertion floor, so a
+  // page that stops running would otherwise look green.
+  it("fails when an expected page did not run", () => {
+    const pages = parseResultsXml(passingPage("JsSlimSuite.SmokeTest"));
 
     const { problems } = evaluateRun({ pages, fitNesseExitCode: 0 });
 
-    expect(problems).toEqual([`tunneled fixture output (${TUNNEL_MARKER}) never reached FitNesse`]);
+    expect(problems).toEqual(["expected page JsSlimSuite.PipeMode did not run"]);
   });
 
-  it("can skip the tunnel check", () => {
-    const pages = parseResultsXml(resultXml({ statuses: Array(12).fill("pass") }));
+  it("fails when every expected page is missing", () => {
+    const { problems } = evaluateRun({ pages: parseResultsXml(""), fitNesseExitCode: 0 });
 
-    expect(evaluateRun({ pages, fitNesseExitCode: 0, marker: null }).problems).toEqual([]);
+    expect(problems).toContain("FitNesse produced no test results");
+    for (const page of DEFAULT_EXPECTED_PAGES) {
+      expect(problems).toContain(`expected page ${page} did not run`);
+    }
+  });
+
+  it("fails when the marker arrives on the wrong page only", () => {
+    // The marker must come from the pipe-mode page: only stdin/stdout mode
+    // patches process output, so a marker elsewhere proves nothing about the tunnel.
+    const pages = parseResultsXml(
+      [
+        passingPage("JsSlimSuite.SmokeTest"),
+        resultXml({ rootPath: TUNNEL_MARKER_PAGE, statuses: Array(4).fill("pass") }),
+      ].join(""),
+    );
+
+    const { problems } = evaluateRun({ pages, fitNesseExitCode: 0 });
+
+    expect(problems).toContain(
+      `pipe-mode fixture output (${TUNNEL_MARKER}) never reached FitNesse for ${TUNNEL_MARKER_PAGE}`,
+    );
+  });
+
+  it("can skip the marker check", () => {
+    const pages = parseResultsXml(
+      resultXml({ rootPath: "Suite.Page", statuses: Array(12).fill("pass") }),
+    );
+
+    expect(
+      evaluateRun({ pages, fitNesseExitCode: 0, marker: null, ...singlePage }).problems,
+    ).toEqual([]);
   });
 
   it("requires a minimum number of assertions by default", () => {
-    const pages = parseResultsXml(resultXml({ statuses: ["pass"], stdOut: TUNNEL_MARKER }));
+    const pages = parseResultsXml(
+      resultXml({ rootPath: "Suite.Page", statuses: ["pass"], stdOut: TUNNEL_MARKER }),
+    );
 
-    const { problems } = evaluateRun({ pages, fitNesseExitCode: 0 });
+    const { problems } = evaluateRun({ pages, fitNesseExitCode: 0, ...singlePage });
 
     expect(problems).toEqual([
       `only 1 assertion(s) passed; expected at least ${DEFAULT_MINIMUM_ASSERTIONS}`,
@@ -163,8 +206,17 @@ describe("parseArguments", () => {
     });
   });
 
-  it("rejects unknown flags and missing values", () => {
-    expect(() => parseArguments(["--nope", "x"])).toThrow(/Unknown option/);
-    expect(() => parseArguments(["--jar"])).toThrow(/Missing value/);
+  it("reports unknown flags as unknown, not as a missing value", () => {
+    expect(() => parseArguments(["--nope"])).toThrow(/Unknown option: --nope/);
+    expect(() => parseArguments(["--jar"])).toThrow(/Missing value for --jar/);
+  });
+
+  it("rejects non-numeric and out-of-range numbers", () => {
+    expect(() => parseArguments(["--port", "abc"])).toThrow(/Invalid value for --port/);
+    expect(() => parseArguments(["--port", "0"])).toThrow(/Invalid value for --port/);
+    expect(() => parseArguments(["--port", "70000"])).toThrow(/Invalid value for --port/);
+    expect(() => parseArguments(["--minimum-assertions", "1.5"])).toThrow(
+      /Invalid value for --minimum-assertions/,
+    );
   });
 });

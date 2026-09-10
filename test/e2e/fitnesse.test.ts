@@ -16,6 +16,20 @@ import { REPO_ROOT, TUNNEL_MARKER, runFitnesse } from "../../scripts/run-fitness
 const JAR = process.env.FITNESSE_JAR ?? "";
 const CLI = join(REPO_ROOT, "dist", "esm", "cli.js");
 const READY = JAR !== "" && existsSync(JAR) && existsSync(CLI);
+const CI = (process.env.CI ?? "") !== "";
+
+/**
+ * Locally the suite skips when the jar or a build is missing. In CI it must
+ * actually run: a skipped acceptance suite would be a missing gate that still
+ * reports green, so the prerequisites are asserted instead.
+ */
+describe.runIf(CI)("FitNesse acceptance prerequisites", () => {
+  it("has the pinned jar and a fresh build", () => {
+    expect(JAR, "FITNESSE_JAR must point at the pinned FitNesse jar").not.toBe("");
+    expect(existsSync(JAR), `${JAR} does not exist`).toBe(true);
+    expect(existsSync(CLI), "dist/esm/cli.js is missing; run `pnpm build`").toBe(true);
+  });
+});
 
 describe.skipIf(!READY)("FitNesse acceptance suite", () => {
   it("passes the committed wiki suite against the built CLI", async () => {

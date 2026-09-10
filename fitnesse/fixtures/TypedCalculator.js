@@ -3,7 +3,7 @@
  * to prove that metadata works in a real FitNesse run.
  *
  * The import points at the *built* library because the CLI loads fixtures with
- * plain Node; `scripts/run-fitnesse.mjs` builds before running.
+ * plain Node, so `pnpm build` must have run before the suite does.
  */
 import { fixture, listOf } from "../../dist/esm/index.js";
 

@@ -65,10 +65,11 @@ than one argument ends the method name with `;` to switch that row to positional
 |add;|1|2|3|
 |check|total|6|
 
-!3 Fixture output is tunneled
+!3 Fixture output
 
-`shout` writes to `console.log`; in TCP mode the protocol owns stdout, so the text must reach
-FitNesse through the `SOUT.:` tunnel rather than corrupting the stream.
+`shout` writes to `console.log`. In TCP mode the protocol runs over the socket, so fixture output
+goes to the process stdout, which FitNesse records as this page's stdout — no tunnel is involved.
+Pipe mode is the transport that needs the `SOUT.:` tunnel; see the `PipeMode` page.
 
 |script|Calculator|
 |shout|
