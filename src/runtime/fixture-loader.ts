@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { SLIM_ERROR, SlimError, formatSlimMessage } from "../errors.js";
@@ -11,7 +11,7 @@ import { SLIM_ERROR, SlimError, formatSlimMessage } from "../errors.js";
 export type FixtureConstructor = new (...args: never[]) => unknown;
 
 /** Hook tried before filesystem/package resolution (e.g. an explicit registry). */
-export type FixtureResolver = (className: string) => FixtureConstructor | undefined;
+export type FixtureResolver = (className: string) => FixtureConstructor | null | undefined;
 
 /** Imports a module specifier; injectable for tests. */
 export type FixtureImporter = (specifier: string) => Promise<unknown>;
@@ -21,7 +21,7 @@ export interface FixtureLoaderOptions {
   resolver?: FixtureResolver;
   /** File extensions to try, in order. */
   extensions?: readonly string[];
-  /** Module importer. Defaults to dynamic `import()`. */
+  /** Module importer. Defaults to a format-aware dynamic import. */
   importer?: FixtureImporter;
   /** File existence check. Defaults to `fs.existsSync`. */
   fileExists?: (path: string) => boolean;
@@ -59,7 +59,7 @@ interface Candidate {
  * `import` paths are search roots (a directory, a module file, or a package
  * specifier) and are searched most-recent-first, like the Java classpath. For a
  * dotted class name such as `eg.Division`, the loader tries nested
- * (`…/eg/Division.js`), flattened (`…/eg.Division.js`) and namespaced
+ * (`…/eg/Division.js`), flattened (`…/eg.Division.js`) and module-relative
  * (`…/eg.js` exporting `Division`) layouts.
  */
 export class FixtureLoader {
@@ -70,6 +70,8 @@ export class FixtureLoader {
   private readonly importer: FixtureImporter;
   private readonly fileExists: (path: string) => boolean;
   private readonly cwd: string;
+  /** First import error seen, attached to `NO_CLASS` for diagnostics. */
+  private firstImportError: unknown;
 
   constructor(options: FixtureLoaderOptions = {}) {
     this.resolver = options.resolver;
@@ -95,11 +97,16 @@ export class FixtureLoader {
   /**
    * Resolve a class name to a fixture constructor.
    *
-   * @throws {SlimError} tagged `NO_CLASS` when nothing matches.
+   * @throws {SlimError} tagged `NO_CLASS` when nothing matches or the name is
+   *   not a usable class name.
    */
   async load(className: string): Promise<FixtureConstructor> {
+    if (!isUsableClassName(className)) {
+      throw this.noClass(className);
+    }
+
     const custom = this.resolver?.(className);
-    if (custom !== undefined) {
+    if (custom != null) {
       return custom;
     }
 
@@ -118,8 +125,13 @@ export class FixtureLoader {
       }
     }
 
-    throw new SlimError(formatSlimMessage(`${className}.`, SLIM_ERROR.NO_CLASS), {
+    throw this.noClass(className);
+  }
+
+  private noClass(className: string): SlimError {
+    return new SlimError(formatSlimMessage(`${className}`, SLIM_ERROR.NO_CLASS), {
       tag: SLIM_ERROR.NO_CLASS,
+      cause: this.firstImportError,
     });
   }
 
@@ -157,7 +169,7 @@ export class FixtureLoader {
     const candidates: Candidate[] = [];
 
     const push = (candidate: Candidate): void => {
-      const key = `${candidate.specifier}\u0000${candidate.exportPath.join(".")}`;
+      const key = `${candidate.specifier}\u0000${JSON.stringify(candidate.exportPath)}`;
       if (!seen.has(key)) {
         seen.add(key);
         candidates.push(candidate);
@@ -170,21 +182,26 @@ export class FixtureLoader {
 
     if (!isFileSystemPath(root)) {
       push({ specifier: root, filePath: null, exportPath: segments });
-      push({ specifier: root, filePath: null, exportPath: [] });
       push({ specifier: root, filePath: null, exportPath: ["default", ...segments] });
       return candidates;
     }
 
     const base = isAbsolute(root) ? root : resolve(this.cwd, root);
 
-    // (a) The root itself is a module file.
+    // (a) The root itself is a module file. The bare default export is only
+    // accepted when the file is named after the class, so an unrelated module
+    // root cannot satisfy an arbitrary class name.
     file(base, segments);
-    file(base, []);
     file(base, ["default", ...segments]);
+    if (isNameDerived(base, className)) {
+      file(base, []);
+    }
     for (const extension of this.extensions) {
       file(`${base}${extension}`, segments);
-      file(`${base}${extension}`, []);
       file(`${base}${extension}`, ["default", ...segments]);
+      if (isNameDerived(`${base}${extension}`, className)) {
+        file(`${base}${extension}`, []);
+      }
     }
 
     // (b) The root is a directory; the class name maps to a file.
@@ -236,7 +253,12 @@ export class FixtureLoader {
   private importModule(specifier: string): Promise<unknown | null> {
     let cached = this.moduleCache.get(specifier);
     if (cached === undefined) {
-      cached = this.importer(specifier).catch(() => null);
+      cached = this.importer(specifier).catch((error: unknown) => {
+        this.firstImportError ??= error;
+        // Do not cache failures: a fixture may become importable later.
+        this.moduleCache.delete(specifier);
+        return null;
+      });
       this.moduleCache.set(specifier, cached);
     }
     return cached;
@@ -250,7 +272,8 @@ export function swapCaseOfFirstLetter(value: string): string {
   }
   const first = value.charAt(0);
   const swapped = first === first.toLowerCase() ? first.toUpperCase() : first.toLowerCase();
-  return `${swapped}${value.slice(1)}`;
+  // Mirror Java's char-based swap: never change the string's length.
+  return swapped.length === 1 ? `${swapped}${value.slice(1)}` : value;
 }
 
 function resolveExport(namespace: unknown, exportPath: readonly string[]): unknown {
@@ -266,9 +289,28 @@ function resolveExport(namespace: unknown, exportPath: readonly string[]): unkno
     if (current === null || current === undefined) {
       return undefined;
     }
+    if (!Object.hasOwn(Object(current), key)) {
+      return undefined;
+    }
     current = (current as Record<string, unknown>)[key];
   }
   return current;
+}
+
+/** True when a module file is named after the class (case-insensitively). */
+function isNameDerived(filePath: string, className: string): boolean {
+  const stem = basename(filePath).replace(/\.[^.]+$/, "");
+  return stem.toLowerCase() === className.toLowerCase();
+}
+
+/** Reject names that could escape the import root or are not strings. */
+function isUsableClassName(className: unknown): className is string {
+  return (
+    typeof className === "string" &&
+    className.length > 0 &&
+    !/[\\/]/.test(className) &&
+    !className.includes("..")
+  );
 }
 
 function isFileSystemPath(value: string): boolean {

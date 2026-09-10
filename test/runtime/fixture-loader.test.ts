@@ -65,6 +65,16 @@ describe("FixtureLoader", () => {
     expect((await loader.load("eg.Division")).name).toBe("Division");
   });
 
+  it("resolves a directory module named after the leading segment", async () => {
+    const loader = makeLoader();
+    loader.addPath(join(FIXTURES, "nsdir"));
+    expect((await loader.load("eg.Division")).name).toBe("Division");
+  });
+
+  it("loads .mjs fixtures", async () => {
+    expect((await fixturesLoader().load("MjsFixture")).name).toBe("MjsFixture");
+  });
+
   it("loads named exports from a module file", async () => {
     const loader = makeLoader();
     loader.addPath(join(FIXTURES, "multiple.js"));
@@ -97,6 +107,32 @@ describe("FixtureLoader", () => {
     expect(loader.paths).toEqual(["/b", "/a"]);
   });
 
+  it("does not satisfy an unknown class from a module-file root's default export", async () => {
+    const loader = makeLoader();
+    loader.addPath(join(FIXTURES, "HelloFixture.js"));
+    await expect(loader.load("Bogus")).rejects.toThrow(SlimError);
+  });
+
+  it("rejects class names with separators or traversal", async () => {
+    await expect(fixturesLoader().load("../evil")).rejects.toThrow(SlimError);
+    await expect(fixturesLoader().load("a/b")).rejects.toThrow(SlimError);
+    await expect(fixturesLoader().load("a\\b")).rejects.toThrow(SlimError);
+    await expect(fixturesLoader().load("")).rejects.toThrow(SlimError);
+  });
+
+  it("does not resolve inherited export paths", async () => {
+    const loader = makeLoader();
+    loader.addPath(join(FIXTURES, "multiple.js"));
+    await expect(loader.load("constructor")).rejects.toThrow(SlimError);
+    await expect(loader.load("__proto__")).rejects.toThrow(SlimError);
+  });
+
+  it("treats a null resolver result as no match", async () => {
+    const loader = makeLoader({ resolver: () => null });
+    loader.addPath(FIXTURES);
+    expect((await loader.load("HelloFixture")).name).toBe("HelloFixture");
+  });
+
   it("uses a custom resolver first", async () => {
     class Stub {}
     const loader = makeLoader({ resolver: (name) => (name === "Stub" ? Stub : undefined) });
@@ -118,7 +154,7 @@ describe("FixtureLoader", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(SlimError);
       expect((error as SlimError).tag).toBe(SLIM_ERROR.NO_CLASS);
-      expect((error as SlimError).message).toBe("message:<<NO_CLASS NoSuchFixture.>>");
+      expect((error as SlimError).message).toBe("message:<<NO_CLASS NoSuchFixture>>");
     }
   });
 
