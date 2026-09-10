@@ -116,8 +116,8 @@ js-slim/
 │  ├─ transport/{frame,socket,stdio,client}.ts
 │  ├─ instructions/{parse,types}.ts
 │  ├─ runtime/{session,statement-executor,execution-context,variable-store,symbols,
-│  │           method-resolver,method-result,fixture-loader,helper-library}.ts
-│  ├─ converters/{registry,string,int,long,double,boolean,date,list,map,void}.ts
+│  │           method-resolver,fixture-loader,helper-library}.ts
+│  ├─ converters/{registry,coerce,smart,string,number,bigint,boolean,date,list,map,object,void}.ts
 │  ├─ errors.ts
 │  ├─ server.ts
 │  ├─ cli.ts
@@ -127,7 +127,8 @@ js-slim/
    ├─ transport/*.test.ts
    ├─ runtime/*.test.ts
    ├─ converters/*.test.ts
-   ├─ server/*.test.ts
+   ├─ server.test.ts                   # SlimServer over a real socket
+   ├─ cli.test.ts                      # argument parsing + CLI end to end
    ├─ fixtures/**.ts + **.js          # TS and plain-JS fixtures
    └─ e2e/fitnesse.test.ts
 ```
@@ -365,17 +366,17 @@ The committed wiki page defines `!define TEST_SYSTEM {slim}`,
 
 ## Steps
 
-- [ ] 1. Scaffold: `package.json`, tsconfigs, vitest, eslint, `write-pkg-type.mjs`, `.gitignore`, README stub.
-- [ ] 2. Protocol codec (`length`, `serializer`, `deserializer`, `SlimSyntaxError`) + golden tests.
-- [ ] 3. Framing + transports (`frame`, `socket`, `stdio`) + `client` + tests.
-- [ ] 4. Instruction parse/types + malformed handling + tests.
-- [ ] 5. Converter registry + standard converters + exact error text + smart-coercion tests.
-- [ ] 6. Variable store / `SlimSymbol` + tests.
-- [ ] 7. Fixture loader (path/package/dotted/resolver hook, `.ts` + `.js`) + fixtures.
-- [ ] 8. Method resolver (SUT, libraries, swap-case, async) + tests.
-- [ ] 9. Execution context + statement executor + helper library + stop/ignore + tests.
-- [ ] 10. Server session loop + error serialization + timeout + tests.
-- [ ] 11. CLI + bin + exit codes.
+- [x] 1. Scaffold: `package.json`, tsconfigs, vitest, eslint, `write-pkg-type.mjs`, `.gitignore`, README stub.
+- [x] 2. Protocol codec (`length`, `serializer`, `deserializer`, `SlimSyntaxError`) + golden tests.
+- [x] 3. Framing + transports (`frame`, `socket`, `stdio`) + `client` + tests.
+- [x] 4. Instruction parse/types + malformed handling + tests.
+- [x] 5. Converter registry + standard converters + exact error text + smart-coercion tests.
+- [x] 6. Variable store / `SlimSymbol` + tests.
+- [x] 7. Fixture loader (path/package/dotted/resolver hook, `.ts` + `.js`) + fixtures.
+- [x] 8. Method resolver (SUT, libraries, swap-case, async) + tests.
+- [x] 9. Execution context + statement executor + helper library + stop/ignore + tests.
+- [x] 10. Server session loop + error serialization + timeout + tests.
+- [x] 11. CLI + bin + exit codes.
 - [ ] 12. Typed authoring API (`slimFixture`, `slimMethod`, `fixture`, `defineFixture`) + examples.
 - [ ] 13. GitHub Actions CI (quality matrix, e2e, pack).
 - [ ] 14. README + docs: `COMMAND_PATTERN`, TS/JS fixture examples, conversion table, protocol notes.

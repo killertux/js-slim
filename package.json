@@ -33,6 +33,9 @@
     },
     "./package.json": "./package.json"
   },
+  "bin": {
+    "js-slim": "./dist/esm/cli.js"
+  },
   "files": [
     "dist"
   ],

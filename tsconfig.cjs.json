@@ -10,5 +10,8 @@
     "module": "CommonJS",
     "moduleResolution": "Node"
   },
-  "include": ["src"]
+  "include": ["src"],
+  // The CLI is ESM-only (it reads `import.meta.url` and is shipped as the
+  // `js-slim` bin). Library consumers use `dist/esm` or `dist/cjs`.
+  "exclude": ["src/cli.ts"]
 }
