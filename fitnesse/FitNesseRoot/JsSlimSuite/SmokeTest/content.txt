@@ -1,0 +1,76 @@
+!define TEST_SYSTEM {slim}
+
+!> FitNesse appends the SLiM port as the final argument, so `COMMAND_PATTERN` must not contain a
+port placeholder. `%p` is FitNesse's *classpath* placeholder (a Java convention) and would be
+replaced with the literal `defaultPath` here.
+
+!define COMMAND_PATTERN {node $PWD/dist/esm/cli.js}
+
+!> `SLIM_PORT` pins the SLiM server to a TCP port; the CLI is launched as `node <cli.js> 9123`.
+!define SLIM_PORT {9123}
+
+!2 End-to-end smoke test (TCP mode)
+
+This page drives the built CLI (`dist/esm/cli.js`) as a real FitNesse SLiM server over TCP.
+`$PWD` is replaced with the absolute repository path by `scripts/render-fitnesse.mjs` before the
+run, so `COMMAND_PATTERN` and the import path always point at the checkout.
+
+|import|
+|$PWD/fitnesse/fixtures|
+
+!3 Script table
+
+A script-table *action* row normally alternates method and argument cells, so a call with more
+than one argument ends the method name with `;` to switch that row to positional arguments.
+
+|script|Calculator|
+|add;|2|3|
+|check|total|5|
+|add|10|
+|check|total|15|
+|reset|
+|check|total|0|
+
+!3 Symbol round-trip
+
+!|script|Calculator|
+|reset|
+|$sum=|add;|7|8|
+|check|total|$sum|
+
+!3 Typed fixture: method alias and list element types
+
+`sum of` is a declared alias for `sumOf`, and `params: [listOf(Number)]` turns `1,2,3` into
+`[1, 2, 3]`, so the total is the number 6 and not the concatenation `"0123"`.
+
+|script|!-TypedCalculator-!|
+|sum of|1,2,3|
+|check|total|6|
+
+!3 Decision table
+
+|Calculator|
+|a|b|sum?|
+|1|2|3|
+|10|20|30|
+|-5|5|0|
+
+!3 Rest arguments
+
+`add;` with three cells passes them positionally to `add(...values)`.
+
+
+|script|Calculator|
+|reset|
+|add;|1|2|3|
+|check|total|6|
+
+!3 Fixture output
+
+`shout` writes to `console.log`. In TCP mode the protocol runs over the socket, so fixture output
+goes to the process stdout, which FitNesse records as this page's stdout — no tunnel is involved.
+Pipe mode is the transport that needs the `SOUT.:` tunnel; see the `PipeMode` page.
+
+|script|Calculator|
+|shout|
+|check|total|0|

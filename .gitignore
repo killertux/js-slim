@@ -12,11 +12,13 @@ coverage/
 .eslintcache
 
 # FitNesse e2e artifacts
+fitnesse/build/
 fitnesse-standalone.jar
 *.jar
 fitnesse/FitNesseRoot/**/ErrorLogs/
 fitnesse/FitNesseRoot/files/
 fitnesse/FitNesseRoot/PageHistory/
+# Root only: the committed suite/suite-page properties.xml files are needed.
 fitnesse/FitNesseRoot/properties.xml
 .fitnesse/
 
