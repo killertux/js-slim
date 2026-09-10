@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { statSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -23,7 +23,7 @@ export interface FixtureLoaderOptions {
   extensions?: readonly string[];
   /** Module importer. Defaults to a format-aware dynamic import. */
   importer?: FixtureImporter;
-  /** File existence check. Defaults to `fs.existsSync`. */
+  /** File existence check. Defaults to a regular-file check. */
   fileExists?: (path: string) => boolean;
   /** Base directory for relative import paths. Defaults to `process.cwd()`. */
   cwd?: string;
@@ -32,6 +32,22 @@ export interface FixtureLoaderOptions {
 const DEFAULT_EXTENSIONS = [".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"] as const;
 
 const nativeImport: FixtureImporter = (specifier) => import(/* @vite-ignore */ specifier);
+
+/**
+ * Default existence check for module files.
+ *
+ * `existsSync` is not enough: an import root is frequently a *directory*, and
+ * `import()`ing a directory throws `ERR_UNSUPPORTED_DIR_IMPORT`. Treating only
+ * regular files as importable skips that probe and keeps the reported
+ * `NO_CLASS` cause meaningful.
+ */
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
 
 /**
  * A dynamic import that works from both output formats.
@@ -77,7 +93,7 @@ export class FixtureLoader {
     this.resolver = options.resolver;
     this.extensions = options.extensions ?? DEFAULT_EXTENSIONS;
     this.importer = options.importer ?? dynamicImport;
-    this.fileExists = options.fileExists ?? existsSync;
+    this.fileExists = options.fileExists ?? isFile;
     this.cwd = options.cwd ?? process.cwd();
   }
 

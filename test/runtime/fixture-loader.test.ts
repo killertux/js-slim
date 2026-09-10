@@ -158,6 +158,19 @@ describe("FixtureLoader", () => {
     }
   });
 
+  it("reports a meaningful cause instead of probing a directory import path as a module", async () => {
+    const error = (await fixturesLoader()
+      .load("MissingClass")
+      .catch((caught: unknown) => caught)) as SlimError;
+
+    expect(error).toBeInstanceOf(SlimError);
+    expect(error.tag).toBe(SLIM_ERROR.NO_CLASS);
+    // The import root is a directory; before the fix the recorded cause was the
+    // misleading `Directory import '…' is not supported` from probing it.
+    expect(String(error.cause)).not.toContain("Directory import");
+    expect(String(error.cause)).toContain("MissingClass");
+  });
+
   it("tries .ts candidates when no .js file exists", async () => {
     const requested: string[] = [];
     const loader = makeLoader({
