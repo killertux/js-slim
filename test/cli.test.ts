@@ -112,6 +112,19 @@ describe("parseArguments", () => {
     }
   });
 
+  it.each([
+    ["2147483", 2_147_483],
+    ["0.05", 0.05],
+    [".5", 0.5],
+    ["+2", 2],
+  ])("accepts a timeout of %s", (value, expected) => {
+    const result = parseArguments(["-s", value]);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.options.timeoutSeconds).toBe(expected);
+    }
+  });
+
   it("combines options and a port", () => {
     const result = parseArguments(["-v", "-d", "-s", "2", "8080"]);
     expect(result).toEqual({
@@ -136,6 +149,11 @@ describe("parseArguments", () => {
     [["-s", "abc"], "Invalid timeout"],
     [["-s", "0"], "Invalid timeout"],
     [["-s", "-1"], "Invalid timeout"],
+    [["-s", "1e3"], "Invalid timeout"],
+    [["-s", "0x10"], "Invalid timeout"],
+    [["-s", "0b101"], "Invalid timeout"],
+    [["-s", "  "], "Invalid timeout"],
+    [["-s", "3000000"], "expected 0 < seconds <= 2147483"],
     [["-v=1"], "does not take a value"],
     [["-d=1"], "does not take a value"],
     [["-h=1"], "does not take a value"],
@@ -293,6 +311,89 @@ describe("runCli", () => {
     expect(closed).toBe(true);
   });
 
+  it("returns 98 when a connection handler fails", async () => {
+    const stderr = collect();
+    const failing: SlimConnection = {
+      writeHeader: () => {},
+      readMessage: async () => {
+        throw new Error("malformed frame");
+      },
+      writeMessage: () => {},
+      close: async () => {},
+    };
+
+    const code = await runCli(["9123"], {
+      io: { stderr: stderr.write },
+      createServer: () => makeServer(),
+      startSocketServer: async (options) => {
+        setTimeout(() => {
+          void Promise.resolve(options.handleConnection(failing)).catch(() => {});
+        }, 0);
+        return { port: options.port, async close() {} };
+      },
+    });
+
+    expect(code).toBe(EXIT_STARTUP_FAILURE);
+    expect(stderr.lines.join("")).toContain("malformed frame");
+  });
+
+  it("maps a failing connection's out-of-memory error to 99", async () => {
+    const stderr = collect();
+    const failing: SlimConnection = {
+      writeHeader: () => {},
+      readMessage: async () => {
+        throw new Error("JavaScript heap out of memory");
+      },
+      writeMessage: () => {},
+      close: async () => {},
+    };
+
+    const code = await runCli(["9123"], {
+      io: { stderr: stderr.write },
+      createServer: () => makeServer(),
+      startSocketServer: async (options) => {
+        setTimeout(() => {
+          void Promise.resolve(options.handleConnection(failing)).catch(() => {});
+        }, 0);
+        return { port: options.port, async close() {} };
+      },
+    });
+
+    expect(code).toBe(EXIT_OUT_OF_MEMORY);
+    expect(stderr.lines.join("")).toContain("Out of Memory. Aborting.");
+  });
+
+  it("keeps a daemon alive after a failing connection", async () => {
+    const controller = new AbortController();
+    const stderr = collect();
+    const failing: SlimConnection = {
+      writeHeader: () => {},
+      readMessage: async () => {
+        throw new Error("flaky client");
+      },
+      writeMessage: () => {},
+      close: async () => {},
+    };
+
+    const running = runCli(["-d", "9123"], {
+      signal: controller.signal,
+      io: { stderr: stderr.write },
+      createServer: () => makeServer(),
+      startSocketServer: async (options) => {
+        setTimeout(() => {
+          void Promise.resolve(options.handleConnection(failing)).catch(() => {});
+        }, 0);
+        return { port: options.port, async close() {} };
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    controller.abort();
+
+    expect(await running).toBe(0);
+    expect(stderr.lines.join("")).toContain("connection failed: Error: flaky client");
+  });
+
   it("returns 98 and reports a bind failure", async () => {
     const stderr = collect();
     const error = Object.assign(new Error("listen EADDRINUSE: address already in use"), {
@@ -323,6 +424,21 @@ describe("runCli", () => {
 
     expect(code).toBe(EXIT_STARTUP_FAILURE);
     expect(stderr.lines.join("")).toContain("js-slim failed: boom");
+  });
+
+  it("falls back to the message when an error has no stack", async () => {
+    const stderr = collect();
+    const error = Object.assign(new Error("no stack"), { stack: undefined });
+
+    const code = await runCli(["9123"], {
+      io: { stderr: stderr.write },
+      startSocketServer: async () => {
+        throw error;
+      },
+    });
+
+    expect(code).toBe(EXIT_STARTUP_FAILURE);
+    expect(stderr.lines.join("")).toContain("js-slim failed: Error: no stack");
   });
 
   it.each([
@@ -438,6 +554,23 @@ describe("main", () => {
       expect(closed).toBe(true);
     } finally {
       process.exitCode = previous;
+    }
+  });
+
+  it("keeps default signal handling in pipe mode", async () => {
+    const before = process.listenerCount("SIGINT");
+    const connection = new FakeConnection(["bye"]);
+
+    try {
+      const code = await main([], {
+        createServer: () => makeServer(),
+        createStdioConnection: () => connection,
+      });
+
+      expect(code).toBe(0);
+      expect(process.listenerCount("SIGINT")).toBe(before);
+    } finally {
+      process.exitCode = undefined;
     }
   });
 });

@@ -31,9 +31,13 @@ Arguments:
 
 Options:
   -v, --verbose        Log every instruction and result to stderr
-  -s, --timeout <sec>  Per-instruction timeout in seconds (fractions allowed)
+  -s, --timeout <sec>  Per-instruction timeout in seconds (decimals allowed)
   -d, --daemon         Keep listening after the first connection (TCP mode only)
   -h, --help           Show this help and exit
+
+Notes:
+  Java's -i (interaction class) and -ssl options are not supported.
+  A non-numeric or out-of-range port exits ${EXIT_BAD_ARGUMENTS} rather than throwing.
 
 Exit codes: 0 success, ${EXIT_BAD_ARGUMENTS} bad arguments, ${EXIT_STARTUP_FAILURE} startup failure, ${EXIT_OUT_OF_MEMORY} out of memory.
 `;
@@ -68,8 +72,10 @@ export interface CliDependencies {
   startSocketServer?: (options: SocketServerOptions) => Promise<RunningSocketServer>;
 }
 
-// Captured before any stdio tunnel can patch the process streams, so CLI
-// diagnostics always reach the real stderr instead of the protocol tunnel.
+// Looked up at call time so a test can capture the streams. During pipe mode the
+// stdio tunnel wraps these writes into `SERR.:` records, which is how FitNesse
+// receives out-of-band fixture and CLI diagnostics without corrupting the
+// protocol stream.
 const writeToStdout = (text: string): void => {
   process.stdout.write(text);
 };
@@ -131,9 +137,15 @@ export function parseArguments(argv: readonly string[]): ParseResult {
           value = argv[index];
         }
         if (value === undefined) return fail(`Option ${name} requires a value`);
-        const seconds = Number(value);
-        if (value.trim().length === 0 || !Number.isFinite(seconds) || seconds <= 0) {
+        const text = value.trim();
+        if (!DECIMAL_PATTERN.test(text)) {
           return fail(`Invalid timeout: ${value} (expected a positive number of seconds)`);
+        }
+        const seconds = Number(text);
+        // The upper bound keeps `seconds * 1000` inside setTimeout's 32-bit
+        // range, which would otherwise clamp to 1ms and time every call out.
+        if (!(seconds > 0) || seconds > MAX_TIMEOUT_SECONDS) {
+          return fail(`Invalid timeout: ${value} (expected 0 < seconds <= ${MAX_TIMEOUT_SECONDS})`);
         }
         timeoutSeconds = seconds;
         break;
@@ -196,9 +208,10 @@ export async function runCli(
     return 0;
   }
 
-  const server = dependencies.createServer?.(options) ?? defaultServer(options, io);
-
   try {
+    // Built inside the try so a failing factory is reported, not thrown.
+    const server = dependencies.createServer?.(options) ?? defaultServer(options, io);
+
     if (options.port === null) {
       await serveStdio(options, dependencies, io, server);
     } else {
@@ -223,21 +236,30 @@ export async function main(
   argv: readonly string[] = process.argv.slice(2),
   dependencies: CliDependencies = {},
 ): Promise<number> {
+  // Signals are only consumed in TCP mode. Pipe mode keeps Node's default
+  // terminate-on-signal behaviour, matching Java's pipe process.
+  const parsed = parseArguments(argv);
+  const consumeSignals = parsed.ok && !parsed.options.help && parsed.options.port !== null;
+
   const controller = new AbortController();
   const abort = (): void => {
     controller.abort();
   };
 
-  process.on("SIGINT", abort);
-  process.on("SIGTERM", abort);
+  if (consumeSignals) {
+    process.on("SIGINT", abort);
+    process.on("SIGTERM", abort);
+  }
 
   try {
     const code = await runCli(argv, { ...dependencies, signal: controller.signal });
     process.exitCode = code;
     return code;
   } finally {
-    process.off("SIGINT", abort);
-    process.off("SIGTERM", abort);
+    if (consumeSignals) {
+      process.off("SIGINT", abort);
+      process.off("SIGTERM", abort);
+    }
   }
 }
 
@@ -258,6 +280,11 @@ export function isEntryPoint(entry: string | undefined, moduleUrl: string): bool
 function fail(error: string): ParseResult {
   return { ok: false, error };
 }
+
+/** Plain decimal notation only: no hex, binary or exponent forms. */
+const DECIMAL_PATTERN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
+/** Largest timeout whose millisecond value fits in setTimeout's 32-bit range. */
+export const MAX_TIMEOUT_SECONDS = 2_147_483;
 
 /** Split `--opt=value` / `-svalue` into a name and an optional inline value. */
 function splitOption(argument: string): [string, string | undefined] {
@@ -311,14 +338,33 @@ async function serveTcp(
     finished = resolve;
   });
 
+  let handlerError: unknown;
+  let handlerFailed = false;
+
   const running = await start({
     port,
     daemon: options.daemon,
     handleConnection: async (connection) => {
-      await server.serve(connection);
-      // Without `-d` the server serves exactly one connection, like Java's
-      // `SlimService.acceptOne`.
-      if (!options.daemon) finished();
+      try {
+        await server.serve(connection);
+      } catch (error) {
+        // A daemon keeps serving after one bad connection (Java parity); a
+        // single-connection run must surface the failure as its exit code. A
+        // failure caused by our own abort is not an error.
+        if (signal?.aborted !== true) {
+          if (options.daemon) {
+            io.stderr(`js-slim: connection failed: ${describeError(error)}\n`);
+          } else {
+            handlerError = error;
+            handlerFailed = true;
+          }
+        }
+        throw error;
+      } finally {
+        // Without `-d` the server serves exactly one connection, like Java's
+        // `SlimService.acceptOne`.
+        if (!options.daemon) finished();
+      }
     },
   });
 
@@ -342,6 +388,10 @@ async function serveTcp(
   } finally {
     signal?.removeEventListener("abort", onAbort);
     await running.close();
+  }
+
+  if (handlerFailed) {
+    throw handlerError;
   }
 }
 
