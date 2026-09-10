@@ -3,7 +3,13 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { TypedCalculatorFixture } from "../examples/typed-calculator.js";
-import { declaredFixtureName, declaredSutName, getOwnMethodMeta } from "../src/fixture.js";
+import {
+  declaredFixtureName,
+  declaredSutName,
+  getFixtureMethodMeta,
+  getOwnMethodMeta,
+} from "../src/fixture.js";
+import { MethodResolver } from "../src/runtime/method-resolver.js";
 import { parseInstruction } from "../src/instructions/parse.js";
 import type { SlimList } from "../src/protocol/types.js";
 import { ExecutionContext } from "../src/runtime/execution-context.js";
@@ -52,16 +58,11 @@ describe("examples/typed-calculator.ts", () => {
     ]);
   });
 
-  it("reaches the System Under Test directly", async () => {
-    const executor = executorFor(new Map([["TypedCalculator", TypedCalculatorFixture]]));
+  it("prefers the fixture's own method over the System Under Test's", () => {
+    const fixture = new TypedCalculatorFixture();
 
-    const rows = await run(executor, [
-      ["m1", "make", "calc", "TypedCalculator"],
-      // `add` lives on both the fixture and the SUT; the fixture wins.
-      ["c1", "call", "calc", "add", "1"],
-    ]);
-
-    expect(rows[1]).toEqual(["c1", "1"]);
+    // `add` exists on both the fixture and its Calculator; the fixture wins.
+    expect(new MethodResolver().resolve(fixture, "add", 1)?.receiver).toBe(fixture);
   });
 });
 
@@ -71,6 +72,8 @@ describe("examples/Counter.mjs", () => {
     loader.addPath(EXAMPLES);
 
     const Counter = await loader.load("Counter");
+    expect(getFixtureMethodMeta(Counter, "increment")?.params).toEqual([Number]);
+
     const executor = executorFor(new Map([["Counter", Counter]]));
 
     const rows = await run(executor, [

@@ -1,4 +1,5 @@
 import { coerceArgument, toSlimValue } from "../converters/coerce.js";
+import { defaultConverterRegistry, type ConverterRegistry } from "../converters/registry.js";
 import {
   SLIM_ERROR,
   SlimError,
@@ -25,6 +26,11 @@ export interface StatementExecutorOptions {
   helperLibrary?: boolean;
   /** Per-instruction timeout in seconds. Disabled when unset or <= 0. */
   timeoutSeconds?: number | undefined;
+  /**
+   * Registry used for declared parameter and return types. Defaults to the
+   * shared {@link defaultConverterRegistry}.
+   */
+  converterRegistry?: ConverterRegistry;
 }
 
 /**
@@ -38,12 +44,14 @@ export class StatementExecutor implements ActorHost {
   private readonly executionContext: ExecutionContext;
   private readonly resolver: MethodResolver;
   private readonly timeoutSeconds: number;
+  private readonly converters: ConverterRegistry;
   private stopRequested = false;
 
   constructor(options: StatementExecutorOptions = {}) {
     this.executionContext = options.context ?? new ExecutionContext();
     this.resolver = options.methodResolver ?? new MethodResolver();
     this.timeoutSeconds = options.timeoutSeconds ?? 0;
+    this.converters = options.converterRegistry ?? defaultConverterRegistry;
 
     if (options.helperLibrary !== false) {
       this.installHelperLibrary();
@@ -160,7 +168,7 @@ export class StatementExecutor implements ActorHost {
 
     const meta = getMethodMeta(match.receiver, match.method, match.name);
     const converted = replaced.map((value, index) =>
-      coerceArgument(value, meta?.params?.[index] ?? null),
+      coerceArgument(value, meta?.params?.[index] ?? null, this.converters),
     );
 
     return { value: await invokeMethod(match, converted), meta };
@@ -210,7 +218,7 @@ export class StatementExecutor implements ActorHost {
             instruction.methodName,
             instruction.args,
           );
-          return [instruction.id, toSlimValue(value, meta?.returns)];
+          return [instruction.id, toSlimValue(value, meta?.returns, this.converters)];
         }
 
         case "callAndAssign": {
@@ -220,7 +228,7 @@ export class StatementExecutor implements ActorHost {
             instruction.args,
           );
           this.assign(instruction.symbolName, value);
-          return [instruction.id, toSlimValue(value, meta?.returns)];
+          return [instruction.id, toSlimValue(value, meta?.returns, this.converters)];
         }
 
         case "invalid":

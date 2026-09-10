@@ -3,7 +3,7 @@ import type { SlimSerializable, SlimValue } from "../protocol/types.js";
 import { formatDate } from "./date.js";
 import { formatHashTable } from "./map.js";
 import { defaultConverterRegistry, type ConverterRegistry } from "./registry.js";
-import { isListType, slimTypeName, type SlimType } from "./slim-type.js";
+import { isListType, normalizeSlimType, slimTypeName, type SlimType } from "./slim-type.js";
 import { smartCoerce } from "./smart.js";
 import { VOID_TAG } from "./void.js";
 
@@ -25,6 +25,12 @@ export function coerceValue(
   }
 
   if (isListType(type)) {
+    // A hand-written descriptor may omit the element type; fail loudly rather
+    // than silently leaving the elements as raw SLiM strings.
+    if ((type as { element?: SlimType }).element === undefined) {
+      throw noConverterError("list");
+    }
+
     const converter = registry.get<SlimValue[]>(Array);
     if (converter === undefined) {
       throw noConverterError("list");
@@ -33,7 +39,10 @@ export function coerceValue(
     if (list === null) {
       return null;
     }
-    return list.map((item) => coerceValue(item, type.element, registry));
+    // Elements go through `coerceArgument`, not `coerceValue`: a symbol may hold
+    // a list whose items are already JavaScript values (a `number[]`), which a
+    // converter would not understand.
+    return list.map((item) => coerceArgument(item, type.element, registry));
   }
 
   const converter = registry.get(type);
@@ -48,19 +57,66 @@ export function coerceValue(
  *
  * A declared type uses its converter; otherwise strings and lists are
  * smart-coerced and other values (symbol-as-object) pass through unchanged.
+ *
+ * A symbol may hold any JavaScript value, while a converter only understands
+ * SLiM strings and lists, so a symbol value that already satisfies the declared
+ * type is passed straight through (a `Date` for `Date`, `5` for `Number`) and
+ * anything else is stringified first — `$n` holding the number `5` fills a
+ * `String` parameter as `"5"` rather than arriving as a number.
  */
 export function coerceArgument(
   value: unknown,
   type?: SlimType | null,
   registry: ConverterRegistry = defaultConverterRegistry,
 ): unknown {
-  if (type !== undefined && type !== null) {
-    return coerceValue(value as SlimValue, type, registry);
+  if (type === undefined || type === null) {
+    if (typeof value === "string" || Array.isArray(value)) {
+      return smartCoerce(value as SlimValue);
+    }
+    return value;
   }
-  if (typeof value === "string" || Array.isArray(value)) {
-    return smartCoerce(value as SlimValue);
+
+  if (typeof value !== "string" && !Array.isArray(value)) {
+    if (matchesDeclaredType(value, type)) {
+      return value;
+    }
+    if (value === null || value === undefined) {
+      return null;
+    }
+    return coerceValue(String(value), type, registry);
   }
-  return value;
+
+  return coerceValue(value as SlimValue, type, registry);
+}
+
+/** Whether a symbol value already has the declared JavaScript type. */
+function matchesDeclaredType(value: unknown, type: SlimType): boolean {
+  // A value matching a list descriptor is routed through `coerceValue` by
+  // `coerceArgument` before this is consulted, so a descriptor never matches here.
+  if (isListType(type)) {
+    return false;
+  }
+
+  switch (normalizeSlimType(type)) {
+    case String:
+      return typeof value === "string";
+    case Number:
+      return typeof value === "number";
+    case BigInt:
+      return typeof value === "bigint";
+    case Boolean:
+      return typeof value === "boolean";
+    case Date:
+      return value instanceof Date;
+    case Array:
+      return Array.isArray(value);
+    case Map:
+      return value instanceof Map;
+    case Object:
+      return (typeof value === "object" && value !== null) || typeof value === "function";
+    default:
+      return false;
+  }
 }
 
 /**

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { coerceValue, toSlimValue } from "../../src/converters/coerce.js";
+import { coerceArgument, coerceValue, toSlimValue } from "../../src/converters/coerce.js";
 import { ConverterRegistry } from "../../src/converters/registry.js";
 import { listOf } from "../../src/converters/slim-type.js";
 import { smartCoerce } from "../../src/converters/smart.js";
@@ -176,5 +176,55 @@ describe("listOf element types", () => {
     expect(toSlimValue([1, 2, 3], listOf(Number))).toEqual(["1", "2", "3"]);
     expect(toSlimValue([new Date(Date.UTC(2009, 4, 5))], listOf(Date))).toEqual(["05-May-2009"]);
     expect(toSlimValue([1, 2], Array)).toEqual(["1", "2"]);
+  });
+});
+
+describe("malformed type declarations", () => {
+  it("rejects a list descriptor with no element type", () => {
+    expect(() => coerceValue("1,2", { kind: "list" } as never)).toThrow(
+      /NO_CONVERTER_FOR_ARGUMENT_NUMBER/,
+    );
+  });
+});
+
+describe("coerceArgument with declared types", () => {
+  it("passes a symbol value that already has the declared type", () => {
+    const date = new Date(Date.UTC(2009, 4, 5));
+    const map = new Map([["a", "b"]]);
+    const object = { x: 1 };
+
+    expect(coerceArgument(5, Number)).toBe(5);
+    expect(coerceArgument("x", String)).toBe("x");
+    expect(coerceArgument(true, Boolean)).toBe(true);
+    expect(coerceArgument(5n, BigInt)).toBe(5n);
+    expect(coerceArgument(date, Date)).toBe(date);
+    expect(coerceArgument(map, Map)).toBe(map);
+    expect(coerceArgument(object, Object)).toBe(object);
+  });
+
+  it("stringifies a symbol value of another type", () => {
+    expect(coerceArgument(5, String)).toBe("5");
+    expect(coerceArgument("5", Number)).toBe(5);
+    expect(coerceArgument(0, String)).toBe("0");
+    expect(coerceArgument(null, Number)).toBeNull();
+    expect(coerceArgument(undefined, Number)).toBeNull();
+    // A scalar symbol can still fill a collection or void parameter.
+    expect(coerceArgument(5, listOf(Number))).toEqual([5]);
+    expect(coerceArgument(5, "list")).toEqual(["5"]);
+    expect(coerceArgument(5, "void")).toBeNull();
+  });
+
+  it("converts a symbol holding a list of numbers", () => {
+    expect(coerceArgument([1, 2, 3], listOf(Number))).toEqual([1, 2, 3]);
+    expect(coerceArgument([[1, 2], [3]], listOf(listOf(Number)))).toEqual([[1, 2], [3]]);
+    // Mixed elements take whichever path applies to each one.
+    expect(coerceArgument(["1", 2], listOf(Number))).toEqual([1, 2]);
+  });
+
+  it("leaves an undeclared symbol value alone", () => {
+    expect(coerceArgument(5)).toBe(5);
+    expect(coerceArgument(new Date(0))).toBeInstanceOf(Date);
+    expect(coerceArgument("42")).toBe(42);
+    expect(coerceArgument("42", "void")).toBeNull();
   });
 });

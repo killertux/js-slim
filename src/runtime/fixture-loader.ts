@@ -119,6 +119,11 @@ export class FixtureLoader {
   /**
    * Resolve a class name to a fixture constructor.
    *
+   * The name is matched against file paths derived from it, so a fixture that
+   * renames itself through `FixtureMeta.name` needs a module file named after
+   * that name. Package specifiers are resolved by export path only, so declared
+   * names do not apply to them.
+   *
    * @throws {SlimError} tagged `NO_CLASS` when nothing matches or the name is
    *   not a usable class name.
    */

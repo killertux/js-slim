@@ -11,6 +11,7 @@ import {
   getFixtureMethodMeta,
   getMethodMeta,
   getOwnMethodMeta,
+  inheritFixtureMeta,
   isFactoryFixture,
   methodWireName,
   slimFixture,
@@ -231,5 +232,71 @@ describe("metadata types", () => {
 
     expect(meta.methods?.call?.params).toEqual([String, Number]);
     expect(method.params).toEqual([String]);
+  });
+});
+
+describe("inheritFixtureMeta", () => {
+  it("carries metadata onto an object that has none", () => {
+    const source = (): object => ({});
+    defineFixture(source, { name: "Source", sut: "service" });
+
+    const target: object = {};
+    inheritFixtureMeta(target, source);
+
+    expect(getFixtureMeta(target)).toEqual({ name: "Source", sut: "service" });
+  });
+
+  it("keeps metadata the target already has", () => {
+    const source = (): object => ({});
+    defineFixture(source, { name: "Source" });
+
+    class Own {}
+    defineFixture(Own, { name: "Own" });
+
+    const instance = new Own();
+    inheritFixtureMeta(instance, source);
+
+    expect(getFixtureMeta(instance)?.name).toBe("Own");
+  });
+
+  it("leaves a non-extensible target alone", () => {
+    const source = (): object => ({});
+    defineFixture(source, { name: "Source" });
+
+    const frozen = Object.freeze({});
+    expect(() => inheritFixtureMeta(frozen, source)).not.toThrow();
+    expect(getFixtureMeta(frozen)).toBeUndefined();
+  });
+
+  it("does nothing when the source has no metadata", () => {
+    const target: object = {};
+    inheritFixtureMeta(target, (): object => ({}));
+
+    expect(getFixtureMeta(target)).toBeUndefined();
+  });
+});
+
+describe("metadata readers on awkward objects", () => {
+  it("returns undefined for objects that cannot carry class metadata", () => {
+    const bare = Object.create(null) as object;
+
+    expect(getFixtureMeta(bare)).toBeUndefined();
+    expect(getFixtureMeta({ constructor: 42 })).toBeUndefined();
+    expect(getFixtureMeta(new Map())).toBeUndefined();
+    expect(getFixtureMeta(new Date())).toBeUndefined();
+  });
+});
+
+describe("slimMethod on static methods", () => {
+  it("attaches metadata to the static function", () => {
+    class Subject {
+      @slimMethod({ name: "make it", returns: String })
+      static create(): string {
+        return "made";
+      }
+    }
+
+    expect(getOwnMethodMeta(Subject.create)?.name).toBe("make it");
+    expect(Subject.create()).toBe("made");
   });
 });

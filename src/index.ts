@@ -99,6 +99,7 @@ export {
   getFixtureMethodMeta,
   getMethodMeta,
   getOwnMethodMeta,
+  inheritFixtureMeta,
   isFactoryFixture,
   methodWireName,
   slimFixture,

@@ -35,13 +35,14 @@ export const DEFAULT_SUT_NAMES = ["sut", "systemUnderTest"] as const;
 /**
  * Find a method on a single object by name and argument count.
  *
- * The exact name is tried first, then the `swapCaseOfFirstLetter` variant
- * (Java parity). A method matches when it declares at most `arity` parameters
- * (`fn.length <= arity`) — JavaScript ignores extra arguments, so a
- * `fn.length > arity` mismatch means the call is missing required parameters.
- * `constructor`, accessors and `Object.prototype` members are never fixture
- * methods. Use {@link MethodResolver.resolve} to prefer exact-arity matches
- * across a receiver chain.
+ * The exact name is tried first, then the `swapCaseOfFirstLetter` variant, then
+ * any method declaring the name through its metadata (Java parity plus the
+ * authoring API; see `MethodMeta.name`). A method matches when it declares at
+ * most `arity` parameters (`fn.length <= arity`) — JavaScript ignores extra
+ * arguments, so a `fn.length > arity` mismatch means the call is missing
+ * required parameters. `constructor`, accessors and `Object.prototype` members
+ * are never fixture methods. Use {@link MethodResolver.resolve} to prefer
+ * exact-arity matches across a receiver chain.
  */
 export function findMethodOn(
   target: object,
@@ -59,9 +60,16 @@ export function findMethodOn(
  * and only data (non-accessor) function properties are listed.
  */
 export function listMethods(target: object): MethodInfo[] {
-  return functionNames(target)
-    .map((name) => ({ name, arity: (lookupFunction(target, name) as FixtureMethod).length }))
-    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const methods: MethodInfo[] = [];
+
+  for (const name of functionNames(target)) {
+    const method = lookupFunction(target, name);
+    if (method !== undefined) {
+      methods.push({ name, arity: method.length });
+    }
+  }
+
+  return methods.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
 /** Render the available methods as `name(arity)` lines, sorted by name. */
@@ -213,7 +221,8 @@ function findMethod(
  *
  * Lets a FitNesse-facing name differ from the JavaScript one — for example
  * `"sum of"` for `sumOf` — whether the alias is declared with `slimMethod` on
- * the function or through `FixtureMeta.methods`.
+ * the function or through `FixtureMeta.methods`. Declared names are matched
+ * exactly; only real method names get the `swapCaseOfFirstLetter` fallback.
  */
 function findMethodByDeclaredName(
   target: object,
@@ -233,7 +242,13 @@ function findMethodByDeclaredName(
   return undefined;
 }
 
-/** Own and inherited data-property function names (excluding `constructor`). */
+/**
+ * Own and inherited data-property function names (excluding `constructor`).
+ *
+ * A name defined anywhere in the chain is only reported from the most derived
+ * definition, so a data property shadowing an inherited method hides it — the
+ * same rule `lookupFunction` applies.
+ */
 function functionNames(target: object): string[] {
   const names: string[] = [];
   const seen = new Set<string>();
@@ -244,9 +259,10 @@ function functionNames(target: object): string[] {
       if (name === "constructor" || seen.has(name)) {
         continue;
       }
+      seen.add(name);
+
       const descriptor = Object.getOwnPropertyDescriptor(current, name);
       if (descriptor !== undefined && typeof descriptor.value === "function") {
-        seen.add(name);
         names.push(name);
       }
     }

@@ -43,7 +43,12 @@ export class ConverterRegistry {
     this.converters.set(normalizeSlimType(type), converter);
   }
 
-  /** Look up the converter for a type (aliases are normalised). */
+  /**
+   * Look up the converter for a type (aliases are normalised).
+   *
+   * A `listOf(…)` descriptor maps to the list converter; element conversion is
+   * applied by `coerceValue`, so call that (not this) to convert a value.
+   */
   get<T = unknown>(type: SlimType): Converter<T> | undefined {
     return this.converters.get(normalizeSlimType(type)) as Converter<T> | undefined;
   }

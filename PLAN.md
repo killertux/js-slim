@@ -261,7 +261,7 @@ Applied to `make` constructor args and `call`/`callAndAssign` args:
 | `"true"` / `"false"` (case-insensitive) | boolean | `"yes"`/`"no"` stay **strings** (matches Java `ShouldIBuyMilk`) |
 | numeric literal (`/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/`, finite) | number | `"007"` → `7`, `"0.50"` → `0.5`; opt out with `String` |
 | integer beyond `Number.MAX_SAFE_INTEGER` | string (lossless) | use `Long`/BigInt when typed |
-| nested list | array (elements recursion only when typed) | `Array<Number>` metadata coerces elements |
+| nested list | array (elements recursion only when typed) | `listOf(Number)` metadata coerces elements |
 | anything else (incl. literal `"null"`) | string | literal `"null"` stays a string, Java parity |
 
 - `coercion: "strict"` server option disables inference (args stay strings/arrays).
@@ -285,7 +285,9 @@ Resolution for `make` class `eg.Division` against imports (front-first):
 ### `runtime/method-resolver.ts`
 
 - Candidate order: instance → System-Under-Test → libraries top-first.
-- Name matching: exact, then `swapCaseOfFirstLetter` (Java parity); no extra conventions.
+- Name matching: exact, then `swapCaseOfFirstLetter` (Java parity), then a method whose declared
+  metadata (`MethodMeta.name`) matches the requested name. Declared names are matched exactly;
+  only real method names get the swap-case fallback.
 - Arity from `fn.length` (rest args supported); miss returns a `noMethod` marker + sorted available
   method signatures for `NO_METHOD_IN_CLASS` diagnostics.
 - SUT detection: property `sut` / `systemUnderTest`, or metadata `sut: "field"`.
@@ -346,6 +348,11 @@ export function defineFixture(ctor: FixtureExport, meta: FixtureMeta): void;
   - `factory: true` calls the export instead of `new`ing it.
   - `methods[].name` / `slimMethod({name})` declare the FitNesse-facing method name.
   - `params`/`returns` select converters for arguments and results instead of smart coercion.
+- Metadata lives in `src/converters/slim-type.ts` (`ConverterKey`, `ListSlimType`, `SlimType`,
+  `listOf`) and `src/fixture.ts`, which re-exports the types for authors who import them there.
+- Readers (`getFixtureMeta`, `getOwnMethodMeta`, `getFixtureMethodMeta`, `getMethodMeta`,
+  `methodWireName`, `declaredFixtureName`, `declaredSutName`, `isFactoryFixture`,
+  `inheritFixtureMeta`) are the supported way for other runtime modules to consult metadata.
 - JS users use `fixture(...)` / `defineFixture(...)` directly; there are runnable examples in
   `examples/` that the test suite executes.
 

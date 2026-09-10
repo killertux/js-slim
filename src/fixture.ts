@@ -8,11 +8,11 @@
  * any duplicated copy of the library — read the same metadata.
  *
  * ```ts
- * \@slimFixture({ sut: "calculator" })
+ * @slimFixture({ sut: "calculator" })
  * class Life {
  *   calculator = new Calculator();
  *
- *   \@slimMethod({ name: "sum of", params: [listOf(Number)], returns: Number })
+ *   @slimMethod({ name: "sum of", params: [listOf(Number)], returns: Number })
  *   sum(values: number[]): number {
  *     return values.reduce((total, value) => total + value, 0);
  *   }
@@ -45,23 +45,31 @@ export type FixtureExport = FixtureClass | FixtureFactory;
 /** Metadata for a single fixture method. */
 export interface MethodMeta {
   /** Wire name used by FitNesse. Defaults to the JavaScript method name. */
-  name?: string;
+  readonly name?: string;
   /** Declared parameter types, in order. */
-  params?: readonly SlimType[];
+  readonly params?: readonly SlimType[];
   /** Declared return type. */
-  returns?: SlimType;
+  readonly returns?: SlimType;
 }
 
 /** Metadata for a fixture class or factory function. */
 export interface FixtureMeta {
-  /** Fixture name. Used to resolve the fixture and in diagnostics. */
-  name?: string;
+  /**
+   * Fixture name. Used in diagnostics, and to resolve the fixture when a
+   * module file is named after it (see {@link FixtureLoader.load}).
+   */
+  readonly name?: string;
   /** Per-method metadata keyed by the JavaScript method name. */
-  methods?: Record<string, MethodMeta>;
+  readonly methods?: Record<string, MethodMeta>;
   /** Property holding the System Under Test, overriding `sut`/`systemUnderTest`. */
-  sut?: string;
-  /** Treat the export as a factory function: call it instead of `new`. */
-  factory?: boolean;
+  readonly sut?: string;
+  /**
+   * Treat the export as a factory function: call it instead of `new`.
+   *
+   * The export must be an ordinary function — calling a class without `new`, or
+   * constructing an arrow function, fails when the fixture is made.
+   */
+  readonly factory?: boolean;
 }
 
 /**
@@ -91,7 +99,7 @@ export type SlimMethodDecorator = (
  * Class decorator declaring fixture metadata.
  *
  * ```ts
- * \@slimFixture({ name: "MyFixture", sut: "service" })
+ * @slimFixture({ name: "MyFixture", sut: "service" })
  * class MyFixture {}
  * ```
  */
@@ -106,7 +114,7 @@ export function slimFixture(meta: FixtureMeta = {}): SlimFixtureDecorator {
  * Method decorator declaring per-method metadata.
  *
  * ```ts
- * \@slimMethod({ name: "sum of", params: [listOf(Number)] })
+ * @slimMethod({ name: "sum of", params: [listOf(Number)] })
  * sum(values: number[]): number {}
  * ```
  */
@@ -146,6 +154,24 @@ export function fixture<C extends FixtureExport>(definition: {
  */
 export function defineFixture(ctor: FixtureExport, meta: FixtureMeta): void {
   setMeta(ctor, FIXTURE_META, mergeFixtureMeta(getFixtureMeta(ctor), meta));
+}
+
+/**
+ * Carry `source`'s metadata onto `target` unless `target` has its own.
+ *
+ * A `factory: true` export builds its own instance, so metadata declared on the
+ * factory function would otherwise be invisible to the runtime: method aliases,
+ * declared types and the SUT are all looked up on the *instance*. The execution
+ * context calls this right after a factory returns.
+ */
+export function inheritFixtureMeta(target: object, source: unknown): void {
+  if (!Object.isExtensible(target)) {
+    return;
+  }
+  const meta = getFixtureMeta(source);
+  if (meta !== undefined && getFixtureMeta(target) === undefined) {
+    setMeta(target, FIXTURE_META, meta);
+  }
 }
 
 /**
@@ -213,12 +239,16 @@ export function isFactoryFixture(value: unknown): boolean {
 // ---------------------------------------------------------------------------
 
 function mergeFixtureMeta(base: FixtureMeta | undefined, next: FixtureMeta): FixtureMeta {
-  const merged: FixtureMeta = { ...base, ...next };
+  const methods =
+    base?.methods === undefined && next.methods === undefined
+      ? undefined
+      : { ...base?.methods, ...next.methods };
 
-  if (base?.methods !== undefined || next.methods !== undefined) {
-    merged.methods = { ...base?.methods, ...next.methods };
-  }
-  return merged;
+  return {
+    ...base,
+    ...next,
+    ...(methods === undefined ? {} : { methods }),
+  };
 }
 
 function readMeta<T>(value: unknown, key: symbol): T | undefined {

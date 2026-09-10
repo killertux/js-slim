@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultConverterRegistry } from "../../src/converters/registry.js";
+import { ConverterRegistry } from "../../src/converters/registry.js";
 import { listOf } from "../../src/converters/slim-type.js";
 import type { Converter } from "../../src/converters/types.js";
 import { defineFixture } from "../../src/fixture.js";
@@ -103,7 +103,7 @@ class ThrowingConstructorFixture {
   }
 }
 
-function setup(): {
+function setup(options: { converterRegistry?: ConverterRegistry } = {}): {
   executor: StatementExecutor;
   register: (name: string, ctor: FixtureConstructor) => void;
 } {
@@ -111,7 +111,7 @@ function setup(): {
   const loader = new FixtureLoader({ resolver: (name) => registry.get(name) });
   const context = new ExecutionContext({ fixtureLoader: loader });
   return {
-    executor: new StatementExecutor({ context }),
+    executor: new StatementExecutor({ context, ...options }),
     register: (name, ctor) => registry.set(name, ctor),
   };
 }
@@ -424,21 +424,118 @@ describe("declared method metadata", () => {
 
   it("converts scalar arguments with declared types", async () => {
     class ScalarFixture {
-      add(a: number, b: number): number {
+      concat(a: string, b: string): string {
         return a + b;
       }
     }
-    defineFixture(ScalarFixture, { methods: { add: { params: [Number, Number] } } });
+    defineFixture(ScalarFixture, { methods: { concat: { params: [String, String] } } });
 
     const { executor, register } = setup();
     register("ScalarFixture", ScalarFixture);
 
+    // Smart coercion would turn these into the numbers 2 and 3 and add them.
     const rows = await run(executor, [
       ["m1", "make", "s", "ScalarFixture"],
-      ["c1", "call", "s", "add", "2", "3"],
+      ["c1", "call", "s", "concat", "2", "3"],
     ]);
 
-    expect(rows[1]).toEqual(["c1", "5"]);
+    expect(rows[1]).toEqual(["c1", "23"]);
+  });
+
+  it("smart-coerces parameters beyond the declared list", async () => {
+    class PartialFixture {
+      describe(a: number, b: unknown): string {
+        return `${typeof a}+${typeof b}`;
+      }
+    }
+    defineFixture(PartialFixture, { methods: { describe: { params: [Number] } } });
+
+    const { executor, register } = setup();
+    register("PartialFixture", PartialFixture);
+
+    const rows = await run(executor, [
+      ["m1", "make", "p", "PartialFixture"],
+      ["c1", "call", "p", "describe", "1", "2"],
+    ]);
+
+    // `a` uses the declared converter; `b` has none, so it is smart-coerced.
+    expect(rows[1]).toEqual(["c1", "number+number"]);
+  });
+
+  it("passes a symbol value that already matches the declared type", async () => {
+    class SymbolFixture {
+      double(value: number): number {
+        return value * 2;
+      }
+
+      label(value: string): string {
+        return `${typeof value}:${String(value)}`;
+      }
+    }
+    defineFixture(SymbolFixture, {
+      methods: { double: { params: [Number] }, label: { params: [String] } },
+    });
+
+    const { executor, register } = setup();
+    register("SymbolFixture", SymbolFixture);
+
+    const rows = await run(executor, [
+      ["m1", "make", "s", "SymbolFixture"],
+      // The symbol holds the raw JS number 10, not a string.
+      ["c1", "callAndAssign", "v", "s", "double", "5"],
+      ["c2", "call", "s", "double", "$v"],
+      ["c3", "callAndAssign", "w", "s", "double", "3"],
+      // A number filling a String parameter is stringified, not passed through.
+      ["c4", "call", "s", "label", "$w"],
+    ]);
+
+    expect(rows.map((row) => row[1])).toEqual(["OK", "10", "20", "6", "string:6"]);
+  });
+
+  it("applies factory metadata to the instance the factory built", async () => {
+    class Service {
+      ping(): string {
+        return "inner";
+      }
+    }
+
+    const build = (): { service: Service; real: (by: number) => number } => ({
+      service: new Service(),
+      real: (by: number): number => by * 2,
+    });
+    defineFixture(build, {
+      name: "Built",
+      sut: "service",
+      factory: true,
+      methods: { real: { name: "twice", params: [Number] } },
+    });
+
+    const { executor, register } = setup();
+    register("Built", build);
+
+    const rows = await run(executor, [
+      ["m1", "make", "b", "Built"],
+      ["c1", "call", "b", "twice", "4"],
+      ["c2", "call", "b", "ping"],
+    ]);
+
+    expect(rows).toEqual([
+      ["m1", "OK"],
+      ["c1", "8"],
+      ["c2", "inner"],
+    ]);
+  });
+
+  it("reports a class declared as a factory as a failed make", async () => {
+    class NotAFactory {}
+    defineFixture(NotAFactory, { factory: true });
+
+    const { executor, register } = setup();
+    register("NotAFactory", NotAFactory);
+
+    const rows = await run(executor, [["m1", "make", "n", "NotAFactory"]]);
+
+    expect(String(rows[0]?.[1])).toContain("cannot be invoked without 'new'");
   });
 
   it("invokes a method through its declared alias", async () => {
@@ -524,21 +621,41 @@ describe("declared method metadata", () => {
     }
     defineFixture(DateFixture, { methods: { today: { returns: Date } } });
 
-    const { executor, register } = setup();
+    const registry = new ConverterRegistry();
+    registry.register(Date, new CustomDateConverter());
+    const { executor, register } = setup({ converterRegistry: registry });
     register("DateFixture", DateFixture);
 
-    const previous = defaultConverterRegistry.get(Date);
-    defaultConverterRegistry.register(Date, new CustomDateConverter());
-    try {
-      const rows = await run(executor, [
-        ["m1", "make", "d", "DateFixture"],
-        ["c1", "call", "d", "today"],
-      ]);
+    const rows = await run(executor, [
+      ["m1", "make", "d", "DateFixture"],
+      ["c1", "call", "d", "today"],
+    ]);
 
-      expect(rows[1]).toEqual(["c1", "custom-date"]);
-    } finally {
-      defaultConverterRegistry.register(Date, previous as Converter<Date>);
+    expect(rows[1]).toEqual(["c1", "custom-date"]);
+  });
+
+  it("renders generically when no return type is declared", async () => {
+    class PlainDateFixture {
+      today(): Date {
+        return new Date(Date.UTC(2009, 4, 5));
+      }
     }
+
+    const registry = new ConverterRegistry();
+    registry.register(Date, {
+      toSlim: () => "custom-date",
+      fromSlim: () => new Date(0),
+    });
+    const { executor, register } = setup({ converterRegistry: registry });
+    register("PlainDateFixture", PlainDateFixture);
+
+    const rows = await run(executor, [
+      ["m1", "make", "p", "PlainDateFixture"],
+      ["c1", "call", "p", "today"],
+    ]);
+
+    // No declared `returns`, so the generic renderer formats the date itself.
+    expect(rows[1]).toEqual(["c1", "05-May-2009"]);
   });
 
   it("reports a missing converter for a declared parameter type", async () => {

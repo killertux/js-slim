@@ -408,3 +408,35 @@ describe("declared metadata", () => {
     expect(listMethods(new Subject()).map((method) => method.name)).toEqual(["real"]);
   });
 });
+
+describe("metadata edge cases", () => {
+  it("hides an inherited method that a data property shadows", () => {
+    const base = {
+      shared(): string {
+        return "base";
+      },
+    };
+    const instance = Object.create(base) as { shared: unknown };
+    instance.shared = 5;
+
+    expect(listMethods(instance).map((method) => method.name)).toEqual([]);
+    expect(() => new MethodResolver().noMethodError(instance, "nope", 0)).not.toThrow();
+  });
+
+  it("resolves an alias declared on the System Under Test", () => {
+    class Service {
+      sumOf(a: number, b: number): number {
+        return a + b;
+      }
+    }
+    defineFixture(Service, { methods: { sumOf: { name: "sum of" } } });
+
+    class Subject {
+      sut = new Service();
+    }
+
+    const match = new MethodResolver().resolve(new Subject(), "sum of", 2);
+    expect(match?.receiver).toBeInstanceOf(Service);
+    expect(match?.method.call(match.receiver, 2, 3)).toBe(5);
+  });
+});

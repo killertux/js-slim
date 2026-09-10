@@ -269,3 +269,13 @@ describe("declared fixture names and factory exports", () => {
     expect(declaredFixtureName(fixture)).toBe("Counter");
   });
 });
+
+describe("declared names with a module-file root", () => {
+  it("resolves an export by its declared name", async () => {
+    const loader = makeLoader({ cwd: AUTHORING });
+    loader.addPath(join(AUTHORING, "MyAlias.js"));
+
+    const fixture = await loader.load("MyAlias");
+    expect(fixture.name).toBe("TempConv");
+  });
+});
