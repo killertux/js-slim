@@ -100,13 +100,33 @@ A single-capital word such as `Calculator` is not a WikiWord and needs no escape
 |a|b|sum?|
 |1|2|3|
 
-|query:Employees|                   ← query table (getters)
+|query:Employees|                   ← query table
 |name|age|
 |Ada|36|
 ```
 
 A decision table calls `setA`/`setB` for the input columns and `sum()` for the `sum?` output column.
-A query table calls the getters named in the header and lists one row per returned object.
+
+A query table calls the fixture's `query()` method — an ordinary SLiM `call`, so nothing special is
+needed on this side. It returns one entry per result row, and each row is a list of `[field, value]`
+pairs:
+
+```js
+query() {
+  return [
+    [["name", "Ada"], ["age", "36"]],
+    [["name", "Grace"], ["age", "45"]],
+  ];
+}
+```
+
+The header cells name which fields to compare (in any order), and rows are matched regardless of the
+order the fixture returns them in.
+
+> The nesting matters. Each row element must be a two-item `[field, value]` list; a flat row such as
+> `["name", "Ada", "age", "36"]` makes FitNesse abort the entire run with
+> `ClassCastException: class java.lang.String cannot be cast to class java.util.List`, and the page's
+> results are reported as incomplete.
 
 ## Fixtures the CLI can load
 
@@ -141,15 +161,15 @@ Useful overrides: `FITNESSE_JAVA` (path to `java`), `FITNESSE_JAR`, and the runn
 
 ## Troubleshooting
 
-| Symptom                                                     | Cause                                                                           |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `exitCode 97`, `Unexpected argument: 9123`                  | `%p` in `COMMAND_PATTERN` (it is the classpath, not the port)                   |
-| `defaultPath` appears in the command                        | Same as above                                                                   |
-| `NO_CLASS MyFixture`                                        | The fixture is not under an `                                                   | import | ` root, or the file/export name differs |
-| `COULD_NOT_INVOKE_CONSTRUCTOR`                              | The class loaded but `new` threw (a `factory: true` export marked as a class?)  |
-| `NO_METHOD_IN_CLASS … Available methods:`                   | Wrong name, or too few parameters for the declared ones                         |
-| `TIMED_OUT <seconds>`                                       | The `-s` timeout elapsed (the call keeps running in the background)             |
-| `NO_CONVERTER_FOR_ARGUMENT_NUMBER`                          | A declared type has no converter registered                                     |
-| A cell shows a `?` link instead of running                  | CamelCase fixture name — escape it as `!-Name-!`                                |
-| `check` reports the wrong value after a multi-argument call | Missing `;` on the action row                                                   |
-| `/__VOID__/` in a `check`                                   | The method returned `undefined`; compare against `/__VOID__/` or return a value |
+| Symptom                                                     | Cause                                                                                                                             |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `exitCode 97`, `Unexpected argument: 9123`                  | `%p` in `COMMAND_PATTERN` (it is the classpath, not the port)                                                                     |
+| `defaultPath` appears in the command                        | Same as above                                                                                                                     |
+| `COULD_NOT_INVOKE_CONSTRUCTOR MyFixture[0]`                 | The class could not be loaded: not under an import root, or the file/export name differs (its `Caused by:` chain says `NO_CLASS`) |
+| `COULD_NOT_INVOKE_CONSTRUCTOR`                              | The class loaded but `new` threw (a `factory: true` export marked as a class?)                                                    |
+| `NO_METHOD_IN_CLASS … Available methods:`                   | Wrong name, or too few parameters for the declared ones                                                                           |
+| `TIMED_OUT <seconds>`                                       | The `-s` timeout elapsed (the call keeps running in the background)                                                               |
+| `NO_CONVERTER_FOR_ARGUMENT_NUMBER`                          | A declared type has no converter registered                                                                                       |
+| A cell shows a `?` link instead of running                  | CamelCase fixture name — escape it as `!-Name-!`                                                                                  |
+| `check` reports the wrong value after a multi-argument call | Missing `;` on the action row                                                                                                     |
+| `/__VOID__/` in a `check`                                   | The method returned `undefined`; compare against `/__VOID__/` or return a value                                                   |

@@ -19,7 +19,8 @@ Slim -- V0.5\n
 - The header is `Slim -- V<version>`; the version is `0.5` (`PROTOCOL_VERSION`).
 - A frame prefix is the payload's **byte** length as at least 6 zero-padded ASCII digits followed
   by `:`. Longer messages grow the digit count (up to 15 digits are accepted); the frame limit is
-  64 MiB by default (`FrameReader`'s `maxFrameBytes`).- `bye` (case-insensitive) ends the session; a clean EOF does too.
+  64 MiB by default (`FrameReader`'s `maxFrameBytes`).
+- `bye` (case-insensitive) ends the session; a clean EOF does too.
 - A frame prefix shorter than 6 digits, missing its `:`, or non-numeric is a transport error: the
   connection fails and the CLI reports exit code `98`.
 
@@ -85,15 +86,17 @@ total(0)>>
 
 Tags produced by the runtime (`SLIM_ERROR`):
 
-| Tag                                | When                                                       |
-| ---------------------------------- | ---------------------------------------------------------- |
-| `MALFORMED_INSTRUCTION`            | The instruction row could not be parsed                    |
-| `NO_CLASS`                         | The fixture class could not be resolved                    |
-| `COULD_NOT_INVOKE_CONSTRUCTOR`     | The class loaded but construction failed                   |
-| `NO_INSTANCE`                      | No such instance (and no library matched)                  |
-| `NO_METHOD_IN_CLASS`               | No method with a matching name and arity                   |
-| `NO_CONVERTER_FOR_ARGUMENT_NUMBER` | A declared type has no registered converter                |
-| `TIMED_OUT`                        | The `-s` timeout elapsed: `message:<<TIMED_OUT <seconds>>` |
+| Tag                                | When                                                                              |
+| ---------------------------------- | --------------------------------------------------------------------------------- |
+| `MALFORMED_INSTRUCTION`            | The instruction row could not be parsed                                           |
+| `COULD_NOT_INVOKE_CONSTRUCTOR`     | The fixture class could not be loaded; the `Caused by:` chain names it `NO_CLASS` |
+| `NO_INSTANCE`                      | No such instance (and no library matched)                                         |
+| `NO_METHOD_IN_CLASS`               | No method with a matching name and arity                                          |
+| `NO_CONVERTER_FOR_ARGUMENT_NUMBER` | A declared type has no registered converter                                       |
+| `TIMED_OUT`                        | The `-s` timeout elapsed: `message:<<TIMED_OUT <seconds>>`                        |
+
+A constructor that throws in its own body is **not** wrapped: its own error is reported as-is, so
+`COULD_NOT_INVOKE_CONSTRUCTOR` always means "this class could not be loaded".
 
 Stop/ignore markers are passed through bare (FitNesse compares them exactly):
 
@@ -110,7 +113,7 @@ A stop/ignore ends the current batch early and the following instructions are no
 
 In stdin/stdout mode **stdout carries the protocol**, so anything a fixture writes to the console
 would corrupt the stream. The CLI therefore patches `process.stdout`/`process.stderr` and forwards
-the captured text over the protocol's own channel, one prefixed record per write:
+the captured text to **stderr**, one prefixed record per write:
 
 ```text
 SOUT.:hello from the fixture
@@ -142,5 +145,5 @@ deliberately:
 ## Client library
 
 `SlimClient` implements the FitNesse side of this protocol (header handshake, framed batch exchange,
-`bye`) and is used by the integration tests and the acceptance suite; it is exported for embedding
-and debugging rather than for production use.
+`bye`) and is used by the integration and CLI tests; it is exported for embedding and debugging
+rather than for production use.

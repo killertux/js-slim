@@ -95,10 +95,23 @@ describe("documentation", () => {
   it.each(MARKDOWN_FILES)("only imports real exports in %s", (path) => {
     const exported = exportedNames();
     const unknown: string[] = [];
+    const quoted = `["']${PACKAGE_NAME}["']`;
 
     for (const block of codeBlocks(markdown(path))) {
+      // A default import would fail at runtime: the package has no default export.
       for (const match of block.code.matchAll(
-        new RegExp(`import\\s+(?:type\\s+)?\\{([^}]*)\\}\\s+from\\s+"${PACKAGE_NAME}"`, "g"),
+        new RegExp(`import\\s+\\w+\\s+from\\s+${quoted}`, "g"),
+      )) {
+        unknown.push(`(default import) ${match[0]}`);
+      }
+
+      // `import { a, b } from "…"`, with an optional `type` keyword and an
+      // optional leading default binding.
+      for (const match of block.code.matchAll(
+        new RegExp(
+          `import\\s+(?:type\\s+)?(?:\\w+\\s*,\\s*)?\\{([^}]*)\\}\\s+from\\s+${quoted}`,
+          "g",
+        ),
       )) {
         for (const entry of (match[1] ?? "").split(",")) {
           // `import { type Foo, bar as baz }` -> compare the imported name.
@@ -114,6 +127,24 @@ describe("documentation", () => {
     }
 
     expect(unknown).toEqual([]);
+  });
+
+  it("detects a code block that imports a non-export", () => {
+    // Sanity-check the guard itself, so a broken regex cannot pass silently.
+    const exported = exportedNames();
+    const block = 'import { SlimServer, NotARealExport } from "@killertux/js-slim";';
+    const found = [
+      ...block.matchAll(
+        /import\s+(?:type\s+)?(?:\w+\s*,\s*)?\{([^}]*)\}\s+from\s+["']@killertux\/js-slim["']/g,
+      ),
+    ]
+      .flatMap((match) => (match[1] ?? "").split(","))
+      .map((entry) => entry.trim())
+      .filter((name) => name.length > 0);
+
+    expect(found).toContain("NotARealExport");
+    expect(found.filter((name) => !exported.has(name))).toEqual(["NotARealExport"]);
+    expect(exported.has("SlimServer")).toBe(true);
   });
 
   it("has a package name and version that match package.json", () => {
@@ -133,6 +164,11 @@ describe("documentation", () => {
     };
     const floor = pkg.engines.node.replace(/^[>=^~\s]+/, "");
 
-    expect(markdown(join(REPO_ROOT, "README.md"))).toContain(`Node.js \`>= ${floor}\``);
+    const runtimeRow = markdown(join(REPO_ROOT, "README.md"))
+      .split("\n")
+      .find((line) => line.startsWith("| **Runtime**"));
+
+    expect(runtimeRow, "the README's Requirements table needs a **Runtime** row").toBeDefined();
+    expect(runtimeRow).toContain(`Node.js \`>= ${floor}\``);
   });
 });

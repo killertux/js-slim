@@ -65,6 +65,16 @@ than one argument ends the method name with `;` to switch that row to positional
 |add;|1|2|3|
 |check|total|6|
 
+!3 Query table
+
+`query()` is invoked as an ordinary `call`; each returned row is a list of `field, value` pairs, and
+FitNesse matches the rows in any order.
+
+|query:Employees|
+|name|age|
+|Grace|45|
+|Ada|36|
+
 !3 Fixture output
 
 `shout` writes to `console.log`. In TCP mode the protocol runs over the socket, so fixture output

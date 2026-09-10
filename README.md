@@ -25,10 +25,10 @@ results — so you can write FitNesse fixtures with the full JavaScript ecosyste
 | **Runtime**     | Node.js `>= 22`                      |
 | **Development** | Node.js `>= 22.13` and pnpm `11.5.2` |
 
-The development floor is higher than the runtime floor because pnpm 11 uses `node:sqlite`, which
-landed in Node 22.13. `package.json` records the runtime floor in `engines`, the toolchain floor in
-`devEngines.runtime`, and pins pnpm itself through `packageManager`. Node 20 is not supported: it is
-end-of-life, and the toolchain cannot run there.
+The development floor is higher than the runtime floor because pnpm 11 requires Node 22.13 or newer
+(it uses `node:sqlite`, which Node 20 lacks). `package.json` records the runtime floor in `engines`,
+the toolchain floor in `devEngines.runtime`, and pins pnpm itself through `packageManager`. Node 20
+is not supported: it is end-of-life, and the toolchain cannot run there.
 
 ## Install
 
@@ -190,8 +190,9 @@ toSlimValue(undefined); // "/__VOID__/"
 | numeric literal (`42`, `-0.5`, `1e3`)          | number                    | `Number` (also trims spaces)   |
 | integer beyond `Number.MAX_SAFE_INTEGER`       | stays a string (lossless) | `BigInt`                       |
 | literal that underflows to `0` (e.g. `1e-400`) | stays a string            | `Number`                       |
-| `[a, b]` / `a, b`                              | list of raw strings       | `Array`, `"list"`, `listOf(T)` |
-| `"null"`, empty string                         | stays a string            | `Void` → `null`                |
+| `a, b`                                         | stays a string            | `Array` → `["a", "b"]`         |
+| `[a, b]` (already decoded)                     | list of raw strings       | `listOf(T)` converts elements  |
+| `"null"`, empty string                         | stays a string            | `"void"` → `null`              |
 | anything else                                  | stays a string            | `Object` → smart-coerced again |
 
 Dates use FitNesse's `dd-MMM-yyyy` format (e.g. `05-May-2009`) interpreted in **UTC**, so results do
