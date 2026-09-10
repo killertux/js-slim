@@ -3,10 +3,17 @@ import { formatHashTable } from "../converters/map.js";
 import type { SlimValue } from "../protocol/types.js";
 import { isSymbolAssignment, substituteSymbols } from "./symbols.js";
 
-/** A stored symbol: the raw value plus its text form. */
+/**
+ * A stored symbol: the raw value plus its text form.
+ *
+ * `text` is `null` when the value has no text rendering (e.g. a null value);
+ * such a symbol is still *defined* (a whole-argument `$name` yields the raw
+ * value) but is left verbatim when referenced inside a larger string, matching
+ * Java's `VariableStore.getStoreSymbolValue` returning `null`.
+ */
 export interface StoredSymbol {
   readonly value: unknown;
-  readonly text: string;
+  readonly text: string | null;
 }
 
 /**
@@ -23,8 +30,8 @@ export class VariableStore {
   private readonly symbols = new Map<string, StoredSymbol>();
 
   /** Store a symbol. `text` defaults to the value's SLiM rendering. */
-  set(name: string, value: unknown, text?: string): void {
-    this.symbols.set(name, { value, text: text ?? renderValue(value) });
+  set(name: string, value: unknown, text?: string | null): void {
+    this.symbols.set(name, { value, text: text === undefined ? renderValue(value) : text });
   }
 
   /** @returns true when a symbol with this (bare) name is defined. */
@@ -43,14 +50,15 @@ export class VariableStore {
   }
 
   /**
-   * @returns the raw value referenced by a whole-argument `$name`, or
-   *   `undefined` when it is not a stored symbol.
+   * @returns the raw value referenced by a whole-argument `$name`, or `null`
+   *   when it is not a stored symbol (Java parity — a stored `null` is
+   *   indistinguishable here, so prefer {@link containsValueFor}).
    */
-  getStored(nameWithDollar: string): unknown {
+  getStored(nameWithDollar: string): unknown | null {
     if (!nameWithDollar.startsWith("$")) {
-      return undefined;
+      return null;
     }
-    return this.symbols.get(nameWithDollar.slice(1))?.value;
+    return this.symbols.get(nameWithDollar.slice(1))?.value ?? null;
   }
 
   /** @returns true when a whole-argument `$name` refers to a stored symbol. */
@@ -65,7 +73,7 @@ export class VariableStore {
 
   /**
    * Replace symbols in a single string, except `$name =` assignments which
-   * become the empty string.
+   * become the empty string. Symbols whose text is `null` are left verbatim.
    */
   replaceSymbolsInString(arg: string): string {
     if (isSymbolAssignment(arg) !== null) {
@@ -85,9 +93,9 @@ export class VariableStore {
   }
 }
 
-function renderValue(value: unknown): string {
+function renderValue(value: unknown): string | null {
   if (value === null || value === undefined) {
-    return "null";
+    return null;
   }
   if (typeof value === "string") {
     return value;
@@ -102,7 +110,7 @@ function renderValue(value: unknown): string {
     return formatHashTable(value as ReadonlyMap<unknown, unknown>);
   }
   if (Array.isArray(value)) {
-    return `[${value.map(renderValue).join(", ")}]`;
+    return `[${value.map((item) => renderValue(item) ?? "null").join(", ")}]`;
   }
   return String(value);
 }

@@ -20,7 +20,7 @@ describe("VariableStore", () => {
 
     expect(store.get("n")?.text).toBe("42");
     expect(store.get("list")?.text).toBe("[a, b]");
-    expect(store.get("nil")?.text).toBe("null");
+    expect(store.get("nil")?.text).toBeNull();
   });
 
   it("honours an explicit text form", () => {
@@ -109,6 +109,43 @@ describe("VariableStore symbol replacement", () => {
     expect(store.containsValueFor("$v")).toBe(true);
     expect(store.containsValueFor("$other")).toBe(false);
     expect(store.containsValueFor("v")).toBe(false);
+  });
+
+  it("leaves null-valued symbols verbatim inline but returns them whole-argument", () => {
+    const store = new VariableStore();
+    store.set("nil", null);
+
+    expect(store.replaceSymbols(["a $nil b"])).toEqual(["a $nil b"]);
+    expect(store.replaceSymbols(["$nil"])).toEqual([null]);
+  });
+
+  it("substitutes an empty-string symbol", () => {
+    const store = new VariableStore();
+    store.set("empty", "");
+    expect(store.replaceSymbols(["a$empty b"])).toEqual(["a b"]);
+  });
+
+  it("returns fresh arrays and preserves the stored reference", () => {
+    const store = new VariableStore();
+    const list = ["a", "b"];
+    store.set("v", list);
+
+    const args = ["$v"];
+    const replaced = store.replaceSymbols(args);
+    expect(replaced).not.toBe(args);
+    expect(replaced[0]).toBe(list);
+
+    const nested = store.replaceSymbols([["$v"]]) as unknown[][];
+    expect(nested[0]?.[0]).toBe(list);
+  });
+
+  it("returns null from getStored for a bare name or a missing symbol", () => {
+    const store = new VariableStore();
+    store.set("v", "Bob");
+
+    expect(store.getStored("v")).toBeNull();
+    expect(store.getStored("$missing")).toBeNull();
+    expect(store.getStored("$v")).toBe("Bob");
   });
 
   it("does not evaluate backtick expressions", () => {

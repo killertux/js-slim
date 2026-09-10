@@ -3,6 +3,9 @@
  *
  * Port of `fitnesse.slim.SlimSymbol.SYMBOL_PATTERN`. The `u` flag is required
  * for the `\p{L}` (Unicode letter) classes.
+ *
+ * Note: this is a stateful global regex — do not loop over it with `exec`/`test`
+ * without resetting `lastIndex`; {@link substituteSymbols} uses its own copy.
  */
 export const SYMBOL_PATTERN = /\$(([A-Za-z\p{L}][\w\p{L}]*)|`([^`]+)`)/gu;
 
@@ -15,6 +18,9 @@ export const SYMBOL_ASSIGNMENT_PATTERN = /^\s*\$([A-Za-z\p{L}][\w\p{L}]*)\s*=\s*
 
 /** Resolves a symbol name to its text value, or `null` when undefined. */
 export type SymbolResolver = (name: string) => string | null;
+
+/** Scan copy of {@link SYMBOL_PATTERN}; `lastIndex` is always set before use. */
+const SCAN_PATTERN = new RegExp(SYMBOL_PATTERN.source, SYMBOL_PATTERN.flags);
 
 /**
  * @returns the symbol name when `content` is a `$name =` assignment, else `null`.
@@ -70,11 +76,8 @@ export function substituteSymbols(text: string, resolve: SymbolResolver): string
 }
 
 function findSymbol(text: string, from: number, resolve: SymbolResolver): SymbolMatch | null {
-  // A fresh regex per scan keeps `lastIndex` from leaking between calls.
-  const pattern = new RegExp(SYMBOL_PATTERN.source, SYMBOL_PATTERN.flags);
-  pattern.lastIndex = from;
-
-  const match = pattern.exec(text);
+  SCAN_PATTERN.lastIndex = from;
+  const match = SCAN_PATTERN.exec(text);
   if (match === null) {
     return null;
   }

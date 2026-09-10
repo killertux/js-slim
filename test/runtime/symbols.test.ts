@@ -61,6 +61,11 @@ describe("substituteSymbols", () => {
     expect(substituteSymbols("$", resolver({}))).toBe("$");
     expect(substituteSymbols("$1abc", resolver({}))).toBe("$1abc");
     expect(substituteSymbols("100$", resolver({}))).toBe("100$");
+    expect(substituteSymbols("$`1+1", resolver({ "`1+1": "2" }))).toBe("$`1+1");
+  });
+
+  it("supports Unicode symbol names", () => {
+    expect(substituteSymbols("$café", resolver({ café: "yes" }))).toBe("yes");
   });
 
   it("returns assignments unchanged", () => {
