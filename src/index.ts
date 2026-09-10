@@ -15,11 +15,21 @@ export {
   EXCEPTION_TAG,
   IGNORE_ALL_TESTS_TAG,
   IGNORE_SCRIPT_TEST_TAG,
+  IgnoreAllTestsError,
+  IgnoreScriptTestError,
   PRETTY_PRINT_END,
   PRETTY_PRINT_START,
   SLIM_ERROR,
   SlimError,
+  StopSuiteError,
+  StopTestError,
+  formatException,
   formatSlimMessage,
+  isIgnoreAllTestsError,
+  isIgnoreScriptTestError,
+  isStopOrIgnoreError,
+  isStopSuiteError,
+  isStopTestError,
 } from "./errors.js";
 export type { SlimErrorOptions, SlimErrorTag } from "./errors.js";
 
@@ -57,6 +67,7 @@ export {
   StringConverter,
   VOID_TAG,
   VoidConverter,
+  coerceArgument,
   coerceValue,
   defaultConverterRegistry,
   formatDate,
@@ -104,6 +115,16 @@ export type {
   MethodMatch,
   MethodResolverOptions,
 } from "./runtime/method-resolver.js";
+export { ExecutionContext } from "./runtime/execution-context.js";
+export type { ExecutionContextOptions, Library } from "./runtime/execution-context.js";
+export {
+  SCRIPT_TABLE_ACTOR,
+  SLIM_HELPER_LIBRARY_NAME,
+  SlimHelperLibrary,
+} from "./runtime/helper-library.js";
+export type { ActorHost } from "./runtime/helper-library.js";
+export { StatementExecutor } from "./runtime/statement-executor.js";
+export type { SlimRow, StatementExecutorOptions } from "./runtime/statement-executor.js";
 
 // Transport
 export { SlimClient, toResultMap } from "./transport/client.js";

@@ -34,6 +34,26 @@ export function coerceValue(
 }
 
 /**
+ * Convert an argument that came from the variable store.
+ *
+ * A declared type uses its converter; otherwise strings and lists are
+ * smart-coerced and other values (symbol-as-object) pass through unchanged.
+ */
+export function coerceArgument(
+  value: unknown,
+  type?: SlimType | null,
+  registry: ConverterRegistry = defaultConverterRegistry,
+): unknown {
+  if (type !== undefined && type !== null) {
+    return coerceValue(value as SlimValue, type, registry);
+  }
+  if (typeof value === "string" || Array.isArray(value)) {
+    return smartCoerce(value as SlimValue);
+  }
+  return value;
+}
+
+/**
  * Render a fixture return value for the wire.
  *
  * `undefined` becomes the void tag, `null` becomes a null value, and dates and

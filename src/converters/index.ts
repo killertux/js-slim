@@ -1,6 +1,6 @@
 export { BigIntConverter } from "./bigint.js";
 export { BooleanConverter } from "./boolean.js";
-export { coerceValue, toSlimValue } from "./coerce.js";
+export { coerceArgument, coerceValue, toSlimValue } from "./coerce.js";
 export { DateConverter, formatDate, parseDate } from "./date.js";
 export { ListConverter, parseListString } from "./list.js";
 export { MapConverter, formatHashTable, parseHashTable } from "./map.js";
