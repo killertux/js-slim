@@ -1,6 +1,6 @@
 # js-slim — a SLiM protocol harness for JavaScript / TypeScript
 
-**Package:** `@killertux/js-slim` · **Runtime:** Node `>=20` · **Toolchain:** pnpm + tsc (dual ESM/CJS) + Vitest
+**Package:** `@killertux/js-slim` · **Runtime:** Node `>=22` · **Toolchain:** pnpm 11 + tsc (dual ESM/CJS) + Vitest
 **Status:** ready for review.
 
 ## Context
@@ -31,7 +31,7 @@ that works from both TypeScript and plain JavaScript.
 2. **Fixture lookup:** `import` paths → modules, with an optional custom resolver hook.
 3. **Type conversion:** smart runtime coercion by default + typed opt-out via decorators/metadata.
 4. **Tests/CI:** Vitest unit + in-repo reference-client integration + real FitNesse e2e in GH Actions.
-5. **Package:** `@killertux/js-slim`, Node `>=20`, pnpm, **tsc-only** dual build, Vitest.
+5. **Package:** `@killertux/js-slim`, Node `>=22` (dev toolchain `>=22.13`), pnpm, **tsc-only** dual build, Vitest.
 6. **TS fixtures:** resolve `.ts` modules; `tsx` is an *optional* peer, precompilation also supported.
 
 ## Goals
@@ -123,6 +123,8 @@ js-slim/
 │  ├─ cli.ts
 │  └─ fixture.ts                       # typed authoring API
 ├─ examples/                           # runnable fixtures, executed by the tests
+├─ docs/                               # FitNesse setup guide + protocol notes
+├─ scripts/                            # e2e render/run + packaging verification
 └─ test/
    ├─ protocol/*.test.ts
    ├─ transport/*.test.ts
@@ -142,7 +144,7 @@ js-slim/
 {
   "name": "@killertux/js-slim",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": { "node": ">=22" },
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
   "types": "./dist/esm/index.d.ts",
@@ -386,7 +388,8 @@ the TS ones also exercise the `tsx` loader.
 
 Three jobs, all on `ubuntu-latest`:
 
-- **quality** — matrix `node: [20.x, 22.x, 24.x]`: `pnpm install --frozen-lockfile`,
+- **quality** — matrix `node: [22.x, 24.x]` (Node 20 cannot run pnpm 11; see the support policy in
+  `README.md`): `pnpm install --frozen-lockfile`,
   `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm coverage`; the coverage
   artifact is uploaded from the 22.x leg. `build` runs **before** coverage because
   `test/cli-bin.test.ts` executes the built CLI and skips a stale build.
@@ -445,7 +448,7 @@ pass by silently corrupting the protocol stream.
 - [x] 11. CLI + bin + exit codes.
 - [x] 12. Typed authoring API (`slimFixture`, `slimMethod`, `fixture`, `defineFixture`) + examples.
 - [x] 13. GitHub Actions CI (quality matrix, e2e, pack).
-- [ ] 14. README + docs: `COMMAND_PATTERN`, TS/JS fixture examples, conversion table, protocol notes.
+- [x] 14. README + docs: `COMMAND_PATTERN`, TS/JS fixture examples, conversion table, protocol notes.
 
 ## Verification
 
