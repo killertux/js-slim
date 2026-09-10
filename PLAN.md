@@ -273,7 +273,8 @@ Resolution for `make` class `eg.Division` against imports (front-first):
 1. Optional **custom resolver hook** `resolveFixture(spec) => Class | undefined`.
 2. **Package specifier** (not starting `.`/`/`) → dynamic `import(spec)` then traverse dotted export path.
 3. **Path import** `/dir` → try nested `dir/eg/Division.{js,mjs,cjs,ts}`, flattened
-   `dir/eg.Division.{js,mjs,cjs,ts}`, module file with namespace export (`dir/eg.js` → `mod.eg.Division`,
+   `dir/eg.Division.{js,mjs,cjs,ts}`, or a module `dir/eg.js` exporting `Division`
+   (also `default.eg.Division`),
    `dir/Division.js` → `mod.default`), plus `swapCaseOfFirstLetter` variants.
 4. Exports may be class, constructor function, or factory (factory marked in metadata).
 - `.ts` resolution works when a loader (`tsx`/`--import tsx`) or compiled JS is present; `tsx` stays
