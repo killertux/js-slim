@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { SLIM_ERROR, SlimError } from "../../src/errors.js";
 import { parseInstruction } from "../../src/instructions/parse.js";
+import type { SlimValue } from "../../src/protocol/types.js";
 
 describe("parseInstruction", () => {
   it("parses import", () => {
@@ -88,9 +89,22 @@ describe("parseInstruction", () => {
     });
   });
 
-  it("does not mutate the source row", () => {
+  it("preserves the original operation case for invalid instructions", () => {
+    expect(parseInstruction(["id", "InvalidOperation"])).toEqual({
+      kind: "invalid",
+      id: "id",
+      operation: "InvalidOperation",
+    });
+  });
+
+  it("returns a fresh args array that does not alias the row", () => {
     const row = ["c1", "call", "s", "m", "1", "2"];
-    parseInstruction(row);
+    const instruction = parseInstruction(row);
+    if (instruction.kind !== "call") {
+      throw new Error("expected a call instruction");
+    }
+
+    (instruction.args as SlimValue[]).push("3");
     expect(row).toEqual(["c1", "call", "s", "m", "1", "2"]);
   });
 });
@@ -128,6 +142,10 @@ describe("parseInstruction malformed rows", () => {
     );
   });
 
+  it("rejects a non-string assign value", () => {
+    expect(() => parseInstruction(["a1", "assign", "v", ["x"]])).toThrow(SlimError);
+  });
+
   it("ignores words after import's path", () => {
     expect(parseInstruction(["id", "import", "path", "extra"])).toEqual({
       kind: "import",
@@ -147,7 +165,7 @@ describe("parseInstruction malformed rows", () => {
   });
 
   it("renders null words in the malformed message", () => {
-    expect(() => parseInstruction(["id", null])).toThrow(
+    expect(() => parseInstruction(["id", null as never])).toThrow(
       "message:<<MALFORMED_INSTRUCTION [id,null].>>",
     );
   });

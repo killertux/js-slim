@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ABORT_SLIM_SUITE_TAG,
+  ABORT_SLIM_TEST_TAG,
+  EXCEPTION_TAG,
+  IGNORE_ALL_TESTS_TAG,
+  IGNORE_SCRIPT_TEST_TAG,
   PRETTY_PRINT_END,
   PRETTY_PRINT_START,
   SLIM_ERROR,
@@ -16,9 +21,21 @@ describe("formatSlimMessage", () => {
   });
 
   it("prefixes a standard tag when given", () => {
-    expect(formatSlimMessage("NO_CLASS Foo", SLIM_ERROR.NO_CLASS)).toBe(
-      "message:<<NO_CLASS NO_CLASS Foo>>",
-    );
+    expect(formatSlimMessage("Foo", SLIM_ERROR.NO_CLASS)).toBe("message:<<NO_CLASS Foo>>");
+  });
+
+  it("omits an empty tag without adding a stray space", () => {
+    expect(formatSlimMessage("boom", "")).toBe("message:<<boom>>");
+  });
+});
+
+describe("exception tags", () => {
+  it("builds the abort/ignore tags from the exception prefix", () => {
+    expect(EXCEPTION_TAG).toBe("__EXCEPTION__:");
+    expect(ABORT_SLIM_TEST_TAG).toBe("__EXCEPTION__:ABORT_SLIM_TEST:");
+    expect(ABORT_SLIM_SUITE_TAG).toBe("__EXCEPTION__:ABORT_SLIM_SUITE:");
+    expect(IGNORE_SCRIPT_TEST_TAG).toBe("__EXCEPTION__:IGNORE_SCRIPT_TEST:");
+    expect(IGNORE_ALL_TESTS_TAG).toBe("__EXCEPTION__:IGNORE_ALL_TESTS:");
   });
 });
 

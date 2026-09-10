@@ -80,6 +80,13 @@ function argumentsFrom(row: readonly SlimValue[], start: number): SlimValue[] {
   return row.slice(start);
 }
 
+/**
+ * Build a `SlimError` for a malformed row.
+ *
+ * The message is already wrapped in `message:<<...>>` (Java parity), so
+ * serialization must not re-apply the wrapper; the `tag` is kept for
+ * introspection only and `prettyPrint` stays false.
+ */
 function malformedError(formattedRow: string): SlimError {
   return new SlimError(formatSlimMessage(`${formattedRow}.`, SLIM_ERROR.MALFORMED_INSTRUCTION), {
     tag: SLIM_ERROR.MALFORMED_INSTRUCTION,
