@@ -43,6 +43,34 @@ export type {
   SlimInstruction,
 } from "./instructions/types.js";
 
+// Converters
+
+export {
+  BigIntConverter,
+  BooleanConverter,
+  ConverterRegistry,
+  DateConverter,
+  ListConverter,
+  MapConverter,
+  NumberConverter,
+  ObjectConverter,
+  StringConverter,
+  VOID_TAG,
+  VoidConverter,
+  coerceValue,
+  defaultConverterRegistry,
+  formatDate,
+  formatHashTable,
+  getConverter,
+  parseDate,
+  parseHashTable,
+  parseListString,
+  slimValueToString,
+  smartCoerce,
+  toSlimValue,
+} from "./converters/index.js";
+export type { Converter, SlimType } from "./converters/types.js";
+
 // Transport
 export { SlimClient, toResultMap } from "./transport/client.js";
 export type { SlimClientOptions } from "./transport/client.js";
