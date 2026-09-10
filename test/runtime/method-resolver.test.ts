@@ -8,6 +8,7 @@ import {
   findSystemUnderTest,
   invokeMethod,
   listMethods,
+  type FixtureMethod,
 } from "../../src/runtime/method-resolver.js";
 
 class BaseFixture {
@@ -202,5 +203,104 @@ describe("MethodResolver", () => {
       "message:<<NO_METHOD_IN_CLASS No Method missing[3] in class TestFixture.",
     );
     expect(error.message).toContain("addTo(2)");
+  });
+});
+
+describe("MethodResolver arity and receiver chain", () => {
+  class ShadowFixture {
+    sut?: object;
+    doThing(): string {
+      return "fixture";
+    }
+  }
+
+  it("prefers an exact-arity SUT method over a relaxed fixture method", () => {
+    const sut = { doThing: (a: number, b: number): string => `sut:${a + b}` };
+    const fixture = new ShadowFixture();
+    fixture.sut = sut;
+
+    const match = new MethodResolver().resolve(fixture, "doThing", 2);
+    expect(match?.receiver).toBe(sut);
+    expect(match?.name).toBe("doThing");
+  });
+
+  it("falls back to a relaxed fixture method when nothing has the exact arity", () => {
+    const fixture = makeFixture();
+    expect(new MethodResolver().resolve(fixture, "addTo", 3)?.receiver).toBe(fixture);
+  });
+
+  it("searches libraries after the fixture and its SUT, in order", () => {
+    const lib1 = { fromLib: () => "lib1" };
+    const lib2 = { fromLib: () => "lib2" };
+
+    const match = new MethodResolver().resolve(makeFixture(), "fromLib", 0, [lib1, lib2]);
+    expect(match?.receiver).toBe(lib1);
+  });
+
+  it("prefers an exact-arity library method over a relaxed fixture method", () => {
+    class RelaxedFixture {
+      run(): string {
+        return "fixture";
+      }
+    }
+
+    const library = { run: (a: number): string => `lib:${a}` };
+    const match = new MethodResolver().resolve(new RelaxedFixture(), "run", 1, [library]);
+    expect(match?.receiver).toBe(library);
+  });
+});
+
+describe("MethodResolver robustness", () => {
+  it("does not resolve Object.prototype members", () => {
+    expect(findMethodOn(makeFixture(), "hasOwnProperty", 1)).toBeUndefined();
+    expect(findMethodOn(makeFixture(), "toString", 0)).toBeUndefined();
+    expect(listMethods(makeFixture()).map((method) => method.name)).not.toContain("toString");
+  });
+
+  it("lists instance property functions", () => {
+    expect(listMethods({ greet: () => "hi" }).map((method) => method.name)).toContain("greet");
+  });
+
+  it("never invokes getters during method lookup", () => {
+    class GetterFixture {
+      get boom(): FixtureMethod {
+        throw new Error("getter must not run");
+      }
+    }
+
+    expect(findMethodOn(new GetterFixture(), "boom", 0)).toBeUndefined();
+  });
+
+  it("ignores a System Under Test getter that throws", () => {
+    class ThrowingSutFixture {
+      get sut(): object {
+        throw new Error("boom");
+      }
+    }
+
+    expect(new MethodResolver().findSut(new ThrowingSutFixture() as object)).toBeUndefined();
+  });
+
+  it("propagates synchronous throws and rejected promises", async () => {
+    const sync = {
+      receiver: {},
+      name: "boom",
+      method: (): never => {
+        throw new Error("sync");
+      },
+    };
+    await expect(invokeMethod(sync, [])).rejects.toThrow("sync");
+
+    const rejected = {
+      receiver: {},
+      name: "boom",
+      method: (): Promise<never> => Promise.reject(new Error("async")),
+    };
+    await expect(invokeMethod(rejected, [])).rejects.toThrow("async");
+  });
+
+  it("names the fallback class in a NO_METHOD_IN_CLASS error for a bare object", () => {
+    const error = new MethodResolver().noMethodError(Object.create(null) as object, "x", 0);
+    expect(error.message).toContain("in class Object.");
   });
 });
