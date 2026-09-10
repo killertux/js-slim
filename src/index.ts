@@ -8,7 +8,7 @@
 export const VERSION = "0.1.0";
 
 export { SlimSyntaxError } from "./protocol/errors.js";
+export { MAX_NESTING_DEPTH, deserialize } from "./protocol/deserializer.js";
 export { encodeLength, MINIMUM_NUMBER_LENGTH } from "./protocol/length.js";
-export { deserialize } from "./protocol/deserializer.js";
 export { serialize } from "./protocol/serializer.js";
-export type { SlimList, SlimValue } from "./protocol/types.js";
+export type { SlimList, SlimSerializable, SlimValue } from "./protocol/types.js";

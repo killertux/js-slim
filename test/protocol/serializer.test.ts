@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { deserialize } from "../../src/protocol/deserializer.js";
 import { serialize } from "../../src/protocol/serializer.js";
+import type { SlimSerializable } from "../../src/protocol/types.js";
 
 // Ported from fitnesse.slim.protocol.SlimSerializerTest.
 describe("serialize", () => {
@@ -30,7 +31,16 @@ describe("serialize", () => {
     expect(serialize([null])).toBe("[000001:000004:null:]");
   });
 
-  it("stringifies non-string items", () => {
+  it("serializes undefined as the literal string null", () => {
+    expect(serialize([undefined])).toBe("[000001:000004:null:]");
+  });
+
+  it("serializes an empty string item", () => {
+    expect(serialize([""])).toBe("[000001:000000::]");
+  });
+
+  it("stringifies numbers and booleans", () => {
+    expect(serialize([1, true])).toBe("[000002:000001:1:000004:true:]");
     expect(deserialize(serialize([1]))).toEqual(["1"]);
   });
 
@@ -43,6 +53,6 @@ describe("serialize", () => {
   });
 
   it("rejects non-array input", () => {
-    expect(() => serialize("nope" as unknown as unknown[])).toThrow(TypeError);
+    expect(() => serialize("nope" as unknown as readonly SlimSerializable[])).toThrow(TypeError);
   });
 });

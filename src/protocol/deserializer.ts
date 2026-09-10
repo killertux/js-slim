@@ -3,6 +3,15 @@ import { MINIMUM_NUMBER_LENGTH } from "./length.js";
 import type { SlimList, SlimValue } from "./types.js";
 
 /**
+ * Maximum list nesting depth accepted by {@link deserialize}.
+ *
+ * The Java reference implementation has no limit and can overflow the stack on
+ * adversarial input; here, exceeding the limit throws a {@link SlimSyntaxError}
+ * instead.
+ */
+export const MAX_NESTING_DEPTH = 500;
+
+/**
  * Parse a SLiM serialized string back into a (possibly nested) list.
  *
  * The inverse of {@link serialize}. Items that themselves start with `[` are
@@ -27,32 +36,40 @@ export function deserialize(serialized: string): SlimList {
     throw new SlimSyntaxError("Can't deserialize empty string");
   }
 
-  return new Reader(source).readList();
+  return new Reader(source).readList(0);
 }
+
+class NestingDepthError extends SlimSyntaxError {}
 
 class Reader {
   private index = 0;
 
   constructor(private readonly source: string) {}
 
-  readList(): SlimList {
+  readList(depth: number): SlimList {
+    if (depth > MAX_NESTING_DEPTH) {
+      throw new NestingDepthError(
+        `Serialized list exceeds the maximum nesting depth of ${MAX_NESTING_DEPTH}`,
+      );
+    }
+
     this.expect("[", "Serialized list has no starting [");
 
     const itemCount = this.readLength();
     const result: SlimList = [];
 
     for (let i = 0; i < itemCount; i += 1) {
-      result.push(this.readItem());
+      result.push(this.readItem(depth));
     }
 
     this.expect("]", "Serialized list has no ending ]");
     return result;
   }
 
-  private readItem(): SlimValue {
+  private readItem(depth: number): SlimValue {
     const itemLength = this.readLength();
     const item = this.readString(itemLength);
-    return maybeReadList(item) ?? item;
+    return maybeReadList(item, depth + 1) ?? item;
   }
 
   private readString(length: number): string {
@@ -103,15 +120,21 @@ function isDigit(char: string | undefined): boolean {
 
 /**
  * @returns the string parsed as a nested list if possible, `null` otherwise.
+ *
+ * A nesting-depth violation is re-thrown rather than treated as a plain string,
+ * so adversarial input fails loudly instead of silently degrading.
  */
-function maybeReadList(value: string): SlimList | null {
+function maybeReadList(value: string, depth: number): SlimList | null {
   if (value.trim() === "" || !value.startsWith("[")) {
     return null;
   }
 
   try {
-    return deserialize(value);
+    return new Reader(value).readList(depth);
   } catch (error) {
+    if (error instanceof NestingDepthError) {
+      throw error;
+    }
     if (error instanceof SlimSyntaxError) {
       return null;
     }

@@ -1,12 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { deserialize } from "../../src/protocol/deserializer.js";
+import { MAX_NESTING_DEPTH, deserialize } from "../../src/protocol/deserializer.js";
 import { SlimSyntaxError } from "../../src/protocol/errors.js";
 import { serialize } from "../../src/protocol/serializer.js";
-import type { SlimList } from "../../src/protocol/types.js";
+import type { SlimList, SlimSerializable, SlimValue } from "../../src/protocol/types.js";
 
-function roundTrip(list: SlimList): SlimList {
+function roundTrip(list: readonly SlimSerializable[]): SlimList {
   return deserialize(serialize(list));
+}
+
+function nest(depth: number): SlimValue {
+  let value: SlimValue = "leaf";
+  for (let i = 0; i < depth; i += 1) {
+    value = [value];
+  }
+  return value;
 }
 
 // Ported from fitnesse.slim.protocol.SlimDeserializerTest.
@@ -43,6 +51,15 @@ describe("deserialize", () => {
     expect(() => deserialize("[00000x:000005:hello:]")).toThrow(SlimSyntaxError);
   });
 
+  it("rejects signed length prefixes", () => {
+    expect(() => deserialize("[+00001:000005:hello:]")).toThrow(SlimSyntaxError);
+    expect(() => deserialize("[-00001:000005:hello:]")).toThrow(SlimSyntaxError);
+  });
+
+  it("rejects an out-of-range declared length", () => {
+    expect(() => deserialize("[000001:99999999999999999999:x:]")).toThrow(SlimSyntaxError);
+  });
+
   it("round-trips an empty list", () => {
     expect(roundTrip([])).toEqual([]);
   });
@@ -55,12 +72,25 @@ describe("deserialize", () => {
     expect(roundTrip(["hello", "world"])).toEqual(["hello", "world"]);
   });
 
+  it("round-trips an empty string item", () => {
+    expect(roundTrip([""])).toEqual([""]);
+  });
+
   it("round-trips a surrogate pair", () => {
     expect(roundTrip(["h🀜llo", "world"])).toEqual(["h🀜llo", "world"]);
   });
 
   it("round-trips a sublist", () => {
     expect(roundTrip([["hello", "world"], "single"])).toEqual([["hello", "world"], "single"]);
+  });
+
+  it("round-trips deep nesting within the depth limit", () => {
+    expect(roundTrip([nest(100)])).toEqual([nest(100)]);
+  });
+
+  it("rejects nesting beyond the depth limit with a SlimSyntaxError", () => {
+    const tooDeep = serialize([nest(MAX_NESTING_DEPTH + 10)]);
+    expect(() => deserialize(tooDeep)).toThrow(SlimSyntaxError);
   });
 
   it("round-trips deep nesting", () => {
