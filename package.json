@@ -15,7 +15,14 @@
   },
   "packageManager": "pnpm@11.5.2",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": ">=22.13",
+      "onFail": "error"
+    }
   },
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",

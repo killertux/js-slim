@@ -123,6 +123,8 @@ js-slim/
 │  ├─ cli.ts
 │  └─ fixture.ts                       # typed authoring API
 ├─ examples/                           # runnable fixtures, executed by the tests
+├─ docs/                               # FitNesse setup guide + protocol notes
+├─ scripts/                            # e2e render/run + packaging verification
 └─ test/
    ├─ protocol/*.test.ts
    ├─ transport/*.test.ts
@@ -445,7 +447,7 @@ pass by silently corrupting the protocol stream.
 - [x] 11. CLI + bin + exit codes.
 - [x] 12. Typed authoring API (`slimFixture`, `slimMethod`, `fixture`, `defineFixture`) + examples.
 - [x] 13. GitHub Actions CI (quality matrix, e2e, pack).
-- [ ] 14. README + docs: `COMMAND_PATTERN`, TS/JS fixture examples, conversion table, protocol notes.
+- [x] 14. README + docs: `COMMAND_PATTERN`, TS/JS fixture examples, conversion table, protocol notes.
 
 ## Verification
 
