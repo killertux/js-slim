@@ -284,7 +284,13 @@ export class StatementExecutor implements ActorHost {
     }
   }
 
-  /** Race an instruction against the configured timeout. */
+  /**
+   * Race an instruction against the configured timeout.
+   *
+   * Unlike Java, an operation that exceeds the timeout keeps running in the
+   * background (JavaScript has no cancellation), so it may still mutate session
+   * state after its `TIMED_OUT` response has been written.
+   */
   private async withTimeout<T>(operation: () => Promise<T>): Promise<T> {
     if (this.timeoutSeconds <= 0) {
       return await operation();

@@ -104,6 +104,35 @@ describe("Session", () => {
     expect(deserialize(connection.written[2] as string)).toEqual([["c1", "2"]]);
   });
 
+  it("stops on a case-insensitive bye", async () => {
+    const connection = new FakeConnection([serialize([["m1", "make", "x", "TestFixture"]]), "BYE"]);
+
+    await makeSession().run(connection);
+    expect(connection.written).toHaveLength(2);
+  });
+
+  it("propagates a malformed frame error", async () => {
+    const connection = new FakeConnection(["not-a-serialized-list"]);
+    await expect(makeSession().run(connection)).rejects.toThrow();
+  });
+
+  it("handles a long sequence of instructions", async () => {
+    const rows: SlimList[] = [["m1", "make", "x", "TestFixture"]];
+    for (let index = 0; index < 1000; index += 1) {
+      rows.push([`id_${index}`, "call", "x", "addTo", String(index), "1"]);
+    }
+
+    const results = await makeSession().handle(rows);
+
+    expect(results).toHaveLength(1001);
+    expect(results[1000]).toEqual(["id_999", "1000"]);
+  });
+
+  it("skips a malformed row that has no usable id", async () => {
+    const results = await makeSession().handle([["m1", "make", "x", "TestFixture"], "not-a-list"]);
+    expect(results).toEqual([["m1", "OK"]]);
+  });
+
   it("turns a malformed instruction into an error row and keeps going", async () => {
     const results = await makeSession().handle([
       ["bad", "call", "onlyThreeWords"],
@@ -204,7 +233,7 @@ describe("Session", () => {
 });
 
 describe("Session error handling", () => {
-  it("stops after a failing method that throws a stop marker", async () => {
+  it("continues after ordinary errors", async () => {
     const registry = new Map<string, FixtureConstructor>([["TestFixture", TestFixture]]);
     const loader = new FixtureLoader({ resolver: (name) => registry.get(name) });
     const executor = new StatementExecutor({

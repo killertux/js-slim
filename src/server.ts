@@ -51,6 +51,11 @@ export class SlimServer {
 
   /** Serve one connection: header, instruction batches, `bye`. */
   async serve(connection: SlimConnection): Promise<void> {
-    await new Session(this.createExecutor(), this.sessionOptions).run(connection);
+    try {
+      await new Session(this.createExecutor(), this.sessionOptions).run(connection);
+    } finally {
+      // Restores stdio tunneling (and is harmless for sockets).
+      await connection.close();
+    }
   }
 }

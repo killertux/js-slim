@@ -109,4 +109,36 @@ describe("SlimServer", () => {
       await running.close();
     }
   });
+
+  it("round-trips a large string argument over the socket", async () => {
+    class EchoFixture {
+      echo(value: string): string {
+        return value;
+      }
+    }
+
+    const registry = new Map<string, FixtureConstructor>([["EchoFixture", EchoFixture]]);
+    const loader = new FixtureLoader({ resolver: (name) => registry.get(name) });
+    const server = new SlimServer({ fixtureLoader: loader });
+    const running = await startSocketServer({
+      port: 0,
+      handleConnection: (connection) => server.serve(connection),
+    });
+
+    const client = await SlimClient.connect({ port: running.port });
+    try {
+      const huge = "x".repeat(1_000_000);
+      const results = toResultMap(
+        await client.invoke([
+          ["m1", "make", "e", "EchoFixture"],
+          ["c1", "call", "e", "echo", huge],
+        ]),
+      );
+      expect(results.get("c1")).toBe(huge);
+      await client.bye();
+    } finally {
+      await client.close();
+      await running.close();
+    }
+  });
 });

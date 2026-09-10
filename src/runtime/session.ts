@@ -70,7 +70,12 @@ export class Session {
       try {
         instruction = parseInstruction(row as readonly SlimValue[]);
       } catch (error) {
-        results.push([rowId(row, index), formatException(error)]);
+        // A row without a usable id is skipped: fabricating one could collide
+        // with a real instruction id and corrupt FitNesse's result mapping.
+        const id = rowId(row);
+        if (id !== null) {
+          results.push([id, formatException(error)]);
+        }
         continue;
       }
 
@@ -93,21 +98,24 @@ export class Session {
   }
 }
 
-function rowId(row: SlimValue, index: number): string {
+function rowId(row: SlimValue): string | null {
   const id = Array.isArray(row) ? row[0] : undefined;
-  return typeof id === "string" ? id : String(index);
+  return typeof id === "string" ? id : null;
 }
 
 function describeInstruction(instruction: SlimInstruction): string {
+  const args = (values: readonly SlimValue[]): string =>
+    values.length === 0 ? "" : ` ${values.join(" ")}`;
+
   switch (instruction.kind) {
     case "import":
       return `import ${instruction.path}`;
     case "make":
-      return `make ${instruction.instanceName} ${instruction.className} ${instruction.args.join(" ")}`;
+      return `make ${instruction.instanceName} ${instruction.className}${args(instruction.args)}`;
     case "call":
-      return `call ${instruction.instanceName} ${instruction.methodName} ${instruction.args.join(" ")}`;
+      return `call ${instruction.instanceName} ${instruction.methodName}${args(instruction.args)}`;
     case "callAndAssign":
-      return `callAndAssign ${instruction.symbolName} ${instruction.instanceName} ${instruction.methodName} ${instruction.args.join(" ")}`;
+      return `callAndAssign ${instruction.symbolName} ${instruction.instanceName} ${instruction.methodName}${args(instruction.args)}`;
     case "assign":
       return `assign ${instruction.symbolName} ${instruction.value}`;
     case "invalid":
