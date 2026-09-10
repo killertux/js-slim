@@ -125,6 +125,10 @@ export {
 export type { ActorHost } from "./runtime/helper-library.js";
 export { StatementExecutor } from "./runtime/statement-executor.js";
 export type { SlimRow, StatementExecutorOptions } from "./runtime/statement-executor.js";
+export { Session } from "./runtime/session.js";
+export type { SessionOptions } from "./runtime/session.js";
+export { SlimServer } from "./server.js";
+export type { SlimServerOptions } from "./server.js";
 
 // Transport
 export { SlimClient, toResultMap } from "./transport/client.js";

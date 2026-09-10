@@ -22,6 +22,8 @@ export interface StatementExecutorOptions {
   methodResolver?: MethodResolver;
   /** Register the built-in `SlimHelperLibrary`. Defaults to true. */
   helperLibrary?: boolean;
+  /** Per-instruction timeout in seconds. Disabled when unset or <= 0. */
+  timeoutSeconds?: number | undefined;
 }
 
 /**
@@ -34,11 +36,13 @@ export interface StatementExecutorOptions {
 export class StatementExecutor implements ActorHost {
   private readonly executionContext: ExecutionContext;
   private readonly resolver: MethodResolver;
+  private readonly timeoutSeconds: number;
   private stopRequested = false;
 
   constructor(options: StatementExecutorOptions = {}) {
     this.executionContext = options.context ?? new ExecutionContext();
     this.resolver = options.methodResolver ?? new MethodResolver();
+    this.timeoutSeconds = options.timeoutSeconds ?? 0;
 
     if (options.helperLibrary !== false) {
       this.installHelperLibrary();
@@ -165,43 +169,58 @@ export class StatementExecutor implements ActorHost {
 
   /** Execute a single parsed instruction, returning its `[id, value]` row. */
   async execute(instruction: SlimInstruction): Promise<SlimRow> {
-    switch (instruction.kind) {
-      case "import":
-        this.addPath(instruction.path);
-        return [instruction.id, "OK"];
+    return await this.withTimeout(async () => {
+      switch (instruction.kind) {
+        case "import":
+          this.addPath(instruction.path);
+          return [instruction.id, "OK"];
 
-      case "make":
-        await this.create(instruction.instanceName, instruction.className, instruction.args);
-        return [instruction.id, "OK"];
+        case "make":
+          await this.create(instruction.instanceName, instruction.className, instruction.args);
+          return [instruction.id, "OK"];
 
-      case "assign":
-        this.assign(instruction.symbolName, instruction.value);
-        return [instruction.id, "OK"];
+        case "assign":
+          this.assign(instruction.symbolName, instruction.value);
+          return [instruction.id, "OK"];
 
-      case "call": {
-        const value = await this.call(
-          instruction.instanceName,
-          instruction.methodName,
-          instruction.args,
-        );
-        return [instruction.id, toSlimValue(value)];
+        case "call": {
+          const value = await this.call(
+            instruction.instanceName,
+            instruction.methodName,
+            instruction.args,
+          );
+          return [instruction.id, toSlimValue(value)];
+        }
+
+        case "callAndAssign": {
+          const value = await this.callAndAssign(
+            instruction.symbolName,
+            instruction.instanceName,
+            instruction.methodName,
+            instruction.args,
+          );
+          return [instruction.id, toSlimValue(value)];
+        }
+
+        case "invalid":
+          throw new SlimError(
+            formatSlimMessage(instruction.operation, SLIM_ERROR.MALFORMED_INSTRUCTION),
+            { tag: SLIM_ERROR.MALFORMED_INSTRUCTION },
+          );
       }
+    });
+  }
 
-      case "callAndAssign": {
-        const value = await this.callAndAssign(
-          instruction.symbolName,
-          instruction.instanceName,
-          instruction.methodName,
-          instruction.args,
-        );
-        return [instruction.id, toSlimValue(value)];
-      }
-
-      case "invalid":
-        throw new SlimError(
-          formatSlimMessage(instruction.operation, SLIM_ERROR.MALFORMED_INSTRUCTION),
-          { tag: SLIM_ERROR.MALFORMED_INSTRUCTION },
-        );
+  /**
+   * Execute one instruction, converting a failure into an exception row and
+   * recording a stop/ignore request. Used by the session loop.
+   */
+  async runInstruction(instruction: SlimInstruction): Promise<SlimRow> {
+    try {
+      return await this.execute(instruction);
+    } catch (error) {
+      this.checkForStop(error);
+      return [instruction.id, formatException(error)];
     }
   }
 
@@ -218,22 +237,13 @@ export class StatementExecutor implements ActorHost {
       if (this.stopRequested) {
         break;
       }
-      results.push(await this.executeSafely(instruction));
+      results.push(await this.runInstruction(instruction));
     }
 
     if (this.stopRequested) {
       this.reset();
     }
     return results;
-  }
-
-  private async executeSafely(instruction: SlimInstruction): Promise<SlimRow> {
-    try {
-      return await this.execute(instruction);
-    } catch (error) {
-      this.checkForStop(error);
-      return [instruction.id, formatException(error)];
-    }
   }
 
   /** Receiver chain: fixture, its SUT, then libraries most-recent-first. */
@@ -271,6 +281,36 @@ export class StatementExecutor implements ActorHost {
   private checkForStop(error: unknown): void {
     if (isStopOrIgnoreError(error)) {
       this.stopRequested = true;
+    }
+  }
+
+  /** Race an instruction against the configured timeout. */
+  private async withTimeout<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.timeoutSeconds <= 0) {
+      return await operation();
+    }
+
+    const seconds = this.timeoutSeconds;
+    let timer: NodeJS.Timeout | undefined;
+
+    try {
+      return await Promise.race([
+        operation(),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            reject(
+              new SlimError(formatSlimMessage(String(seconds), SLIM_ERROR.TIMED_OUT), {
+                tag: SLIM_ERROR.TIMED_OUT,
+              }),
+            );
+          }, seconds * 1000);
+          timer.unref?.();
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
     }
   }
 
