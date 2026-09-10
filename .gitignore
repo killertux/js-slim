@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Test output
+coverage/
+.vitest/
+
+# Tooling caches
+.eslintcache
+
+# FitNesse e2e artifacts
+fitnesse-standalone.jar
+FitNesseRoot/**/ErrorLogs/
+*.jar
+
+# Logs & OS cruft
+*.log
+.DS_Store
+Thumbs.db
+
+# npm pack artifacts
+*.tgz
