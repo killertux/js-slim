@@ -6,18 +6,22 @@ import { ListConverter } from "./list.js";
 import { MapConverter } from "./map.js";
 import { NumberConverter } from "./number.js";
 import { ObjectConverter } from "./object.js";
+import { normalizeSlimType, type ConverterKey, type SlimType } from "./slim-type.js";
 import { StringConverter } from "./string.js";
-import type { Converter, SlimType } from "./types.js";
+import type { Converter } from "./types.js";
 import { VoidConverter } from "./void.js";
 
 /**
- * Registry of {@link Converter}s keyed by {@link SlimType}.
+ * Registry of {@link Converter}s keyed by {@link ConverterKey}.
  *
  * Instances start with the standard converters and can be customised; each
  * registry is independent, so tests and servers do not share mutable state.
+ * String aliases (`"list"`, `"map"`, `"object"`) and {@link ListSlimType}
+ * descriptors are normalised to their constructor key, so registering `Array`
+ * also serves `"list"`.
  */
 export class ConverterRegistry {
-  private readonly converters = new Map<SlimType, Converter<unknown>>();
+  private readonly converters = new Map<ConverterKey, Converter<unknown>>();
 
   constructor() {
     this.registerDefaults();
@@ -32,23 +36,31 @@ export class ConverterRegistry {
   register(type: typeof Map, converter: Converter<Map<string, string>>): void;
   register(type: typeof Object, converter: Converter<unknown>): void;
   register(type: "void", converter: Converter<void>): void;
+  register(type: "list", converter: Converter<SlimValue[]>): void;
+  register(type: "map", converter: Converter<Map<string, string>>): void;
+  register(type: "object", converter: Converter<unknown>): void;
   register(type: SlimType, converter: Converter<unknown>): void {
-    this.converters.set(type, converter);
+    this.converters.set(normalizeSlimType(type), converter);
   }
 
-  /** Look up the converter for a type, if any. */
+  /**
+   * Look up the converter for a type (aliases are normalised).
+   *
+   * A `listOf(…)` descriptor maps to the list converter; element conversion is
+   * applied by `coerceValue`, so call that (not this) to convert a value.
+   */
   get<T = unknown>(type: SlimType): Converter<T> | undefined {
-    return this.converters.get(type) as Converter<T> | undefined;
+    return this.converters.get(normalizeSlimType(type)) as Converter<T> | undefined;
   }
 
   /** @returns true when a converter is registered for `type`. */
   has(type: SlimType): boolean {
-    return this.converters.has(type);
+    return this.converters.has(normalizeSlimType(type));
   }
 
   /** Remove a converter (e.g. to restore a customised registry). */
   remove(type: SlimType): void {
-    this.converters.delete(type);
+    this.converters.delete(normalizeSlimType(type));
   }
 
   private registerDefaults(): void {

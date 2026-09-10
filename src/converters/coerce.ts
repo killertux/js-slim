@@ -3,16 +3,17 @@ import type { SlimSerializable, SlimValue } from "../protocol/types.js";
 import { formatDate } from "./date.js";
 import { formatHashTable } from "./map.js";
 import { defaultConverterRegistry, type ConverterRegistry } from "./registry.js";
+import { isListType, normalizeSlimType, slimTypeName, type SlimType } from "./slim-type.js";
 import { smartCoerce } from "./smart.js";
-import type { SlimType } from "./types.js";
 import { VOID_TAG } from "./void.js";
 
 /**
  * Convert a decoded argument for a fixture.
  *
  * With a declared {@link SlimType} the matching converter is used (and a
- * missing converter raises `NO_CONVERTER_FOR_ARGUMENT_NUMBER`). Without one the
- * argument is smart-coerced (see {@link smartCoerce}).
+ * missing converter raises `NO_CONVERTER_FOR_ARGUMENT_NUMBER`). A
+ * {@link listOf} descriptor also converts each element. Without a declared type
+ * the argument is smart-coerced (see {@link smartCoerce}).
  */
 export function coerceValue(
   value: SlimValue,
@@ -23,12 +24,30 @@ export function coerceValue(
     return smartCoerce(value);
   }
 
+  if (isListType(type)) {
+    // A hand-written descriptor may omit the element type; fail loudly rather
+    // than silently leaving the elements as raw SLiM strings.
+    if ((type as { element?: SlimType }).element === undefined) {
+      throw noConverterError("list");
+    }
+
+    const converter = registry.get<SlimValue[]>(Array);
+    if (converter === undefined) {
+      throw noConverterError("list");
+    }
+    const list = converter.fromSlim(value);
+    if (list === null) {
+      return null;
+    }
+    // Elements go through `coerceArgument`, not `coerceValue`: a symbol may hold
+    // a list whose items are already JavaScript values (a `number[]`), which a
+    // converter would not understand.
+    return list.map((item) => coerceArgument(item, type.element, registry));
+  }
+
   const converter = registry.get(type);
   if (converter === undefined) {
-    throw new SlimError(
-      formatSlimMessage(`${slimTypeName(type)}.`, SLIM_ERROR.NO_CONVERTER_FOR_ARGUMENT_NUMBER),
-      { tag: SLIM_ERROR.NO_CONVERTER_FOR_ARGUMENT_NUMBER },
-    );
+    throw noConverterError(slimTypeName(type));
   }
   return converter.fromSlim(value);
 }
@@ -38,19 +57,66 @@ export function coerceValue(
  *
  * A declared type uses its converter; otherwise strings and lists are
  * smart-coerced and other values (symbol-as-object) pass through unchanged.
+ *
+ * A symbol may hold any JavaScript value, while a converter only understands
+ * SLiM strings and lists, so a symbol value that already satisfies the declared
+ * type is passed straight through (a `Date` for `Date`, `5` for `Number`) and
+ * anything else is stringified first — `$n` holding the number `5` fills a
+ * `String` parameter as `"5"` rather than arriving as a number.
  */
 export function coerceArgument(
   value: unknown,
   type?: SlimType | null,
   registry: ConverterRegistry = defaultConverterRegistry,
 ): unknown {
-  if (type !== undefined && type !== null) {
-    return coerceValue(value as SlimValue, type, registry);
+  if (type === undefined || type === null) {
+    if (typeof value === "string" || Array.isArray(value)) {
+      return smartCoerce(value as SlimValue);
+    }
+    return value;
   }
-  if (typeof value === "string" || Array.isArray(value)) {
-    return smartCoerce(value as SlimValue);
+
+  if (typeof value !== "string" && !Array.isArray(value)) {
+    if (matchesDeclaredType(value, type)) {
+      return value;
+    }
+    if (value === null || value === undefined) {
+      return null;
+    }
+    return coerceValue(String(value), type, registry);
   }
-  return value;
+
+  return coerceValue(value as SlimValue, type, registry);
+}
+
+/** Whether a symbol value already has the declared JavaScript type. */
+function matchesDeclaredType(value: unknown, type: SlimType): boolean {
+  // A value matching a list descriptor is routed through `coerceValue` by
+  // `coerceArgument` before this is consulted, so a descriptor never matches here.
+  if (isListType(type)) {
+    return false;
+  }
+
+  switch (normalizeSlimType(type)) {
+    case String:
+      return typeof value === "string";
+    case Number:
+      return typeof value === "number";
+    case BigInt:
+      return typeof value === "bigint";
+    case Boolean:
+      return typeof value === "boolean";
+    case Date:
+      return value instanceof Date;
+    case Array:
+      return Array.isArray(value);
+    case Map:
+      return value instanceof Map;
+    case Object:
+      return (typeof value === "object" && value !== null) || typeof value === "function";
+    default:
+      return false;
+  }
 }
 
 /**
@@ -78,7 +144,8 @@ export function toSlimValue(
     return String(value);
   }
   if (Array.isArray(value)) {
-    return value.map((item) => toSlimValue(item, undefined, registry));
+    const element = isListType(type) ? type.element : undefined;
+    return value.map((item) => toSlimValue(item, element, registry));
   }
   if (type !== undefined && type !== null) {
     const rendered = registry.get(type)?.toSlim(value as never);
@@ -95,7 +162,10 @@ export function toSlimValue(
   return String(value);
 }
 
-/** Human-readable name for a `SlimType`, used in error messages. */
-function slimTypeName(type: SlimType): string {
-  return typeof type === "string" ? type : type.name;
+/** Build the `NO_CONVERTER_FOR_ARGUMENT_NUMBER` error for a type name. */
+function noConverterError(typeName: string): SlimError {
+  return new SlimError(
+    formatSlimMessage(`${typeName}.`, SLIM_ERROR.NO_CONVERTER_FOR_ARGUMENT_NUMBER),
+    { tag: SLIM_ERROR.NO_CONVERTER_FOR_ARGUMENT_NUMBER },
+  );
 }

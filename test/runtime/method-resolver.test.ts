@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { SLIM_ERROR, SlimError } from "../../src/errors.js";
+import { defineFixture, slimMethod } from "../../src/fixture.js";
 import {
   MethodResolver,
   describeMethods,
@@ -302,5 +303,140 @@ describe("MethodResolver robustness", () => {
   it("names the fallback class in a NO_METHOD_IN_CLASS error for a bare object", () => {
     const error = new MethodResolver().noMethodError(Object.create(null) as object, "x", 0);
     expect(error.message).toContain("in class Object.");
+  });
+});
+
+describe("declared metadata", () => {
+  it("resolves a method by the wire name declared in the fixture table", () => {
+    class Subject {
+      sumOf(a: number, b: number): number {
+        return a + b;
+      }
+    }
+    defineFixture(Subject, { methods: { sumOf: { name: "sum of" } } });
+
+    const match = new MethodResolver().resolve(new Subject(), "sum of", 2);
+    expect(match?.name).toBe("sumOf");
+    expect(match?.method.call(match.receiver, 2, 3)).toBe(5);
+  });
+
+  it("resolves a method by the wire name declared with slimMethod", () => {
+    class Subject {
+      @slimMethod({ name: "wire" })
+      real(name: string): string {
+        return name;
+      }
+    }
+
+    const match = new MethodResolver().resolve(new Subject(), "wire", 1);
+    expect(match?.name).toBe("real");
+    expect(match?.method.call(match.receiver, "x")).toBe("x");
+  });
+
+  it("prefers a real method name over another method's alias", () => {
+    class Subject {
+      ping(): string {
+        return "real";
+      }
+
+      @slimMethod({ name: "ping" })
+      pong(): string {
+        return "alias";
+      }
+    }
+
+    expect(new MethodResolver().resolve(new Subject(), "ping", 0)?.name).toBe("ping");
+  });
+
+  it("applies the arity rule to aliased methods", () => {
+    class Subject {
+      @slimMethod({ name: "target" })
+      one(value: number): number {
+        return value;
+      }
+    }
+
+    expect(new MethodResolver().resolve(new Subject(), "target", 1)?.name).toBe("one");
+    expect(new MethodResolver().resolve(new Subject(), "target", 0)).toBeUndefined();
+  });
+
+  it("uses the declared SUT property in preference to the convention", () => {
+    class Service {
+      ping(): string {
+        return "declared";
+      }
+    }
+
+    class Subject {
+      sut = { ping: (): string => "conventional" };
+      service = new Service();
+    }
+    defineFixture(Subject, { sut: "service" });
+
+    const subject = new Subject();
+    expect(findSystemUnderTest(subject)).toBeInstanceOf(Service);
+    expect(new MethodResolver().resolve(subject, "ping", 0)?.receiver).toBeInstanceOf(Service);
+  });
+
+  it("ignores a declared SUT property that is not an object", () => {
+    class Subject {
+      sut = { ping: (): string => "conventional" };
+      service = 42;
+    }
+    defineFixture(Subject, { sut: "service" });
+
+    expect(findSystemUnderTest(new Subject())).toBeUndefined();
+  });
+
+  it("uses the declared fixture name in NO_METHOD_IN_CLASS diagnostics", () => {
+    class Subject {}
+    defineFixture(Subject, { name: "Renamed" });
+
+    const error = new MethodResolver().noMethodError(new Subject(), "nope", 1);
+    expect(error.message).toContain("in class Renamed.");
+    expect(error.tag).toBe(SLIM_ERROR.NO_METHOD_IN_CLASS);
+  });
+
+  it("does not expose metadata as a method", () => {
+    class Subject {
+      @slimMethod({ returns: Number })
+      real(): number {
+        return 1;
+      }
+    }
+
+    expect(listMethods(new Subject()).map((method) => method.name)).toEqual(["real"]);
+  });
+});
+
+describe("metadata edge cases", () => {
+  it("hides an inherited method that a data property shadows", () => {
+    const base = {
+      shared(): string {
+        return "base";
+      },
+    };
+    const instance = Object.create(base) as { shared: unknown };
+    instance.shared = 5;
+
+    expect(listMethods(instance).map((method) => method.name)).toEqual([]);
+    expect(() => new MethodResolver().noMethodError(instance, "nope", 0)).not.toThrow();
+  });
+
+  it("resolves an alias declared on the System Under Test", () => {
+    class Service {
+      sumOf(a: number, b: number): number {
+        return a + b;
+      }
+    }
+    defineFixture(Service, { methods: { sumOf: { name: "sum of" } } });
+
+    class Subject {
+      sut = new Service();
+    }
+
+    const match = new MethodResolver().resolve(new Subject(), "sum of", 2);
+    expect(match?.receiver).toBeInstanceOf(Service);
+    expect(match?.method.call(match.receiver, 2, 3)).toBe(5);
   });
 });

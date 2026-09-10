@@ -73,14 +73,47 @@ export {
   formatDate,
   formatHashTable,
   getConverter,
+  isListType,
+  listOf,
+  normalizeSlimType,
   parseDate,
   parseHashTable,
   parseListString,
+  slimTypeName,
   slimValueToString,
   smartCoerce,
   toSlimValue,
 } from "./converters/index.js";
-export type { Converter, SlimType } from "./converters/types.js";
+export type { Converter, ConverterKey, ListSlimType, SlimType } from "./converters/types.js";
+
+// Fixture authoring API
+
+export {
+  FIXTURE_META,
+  METHOD_META,
+  declaredFixtureName,
+  declaredSutName,
+  defineFixture,
+  fixture,
+  getFixtureMeta,
+  getFixtureMethodMeta,
+  getMethodMeta,
+  getOwnMethodMeta,
+  inheritFixtureMeta,
+  isFactoryFixture,
+  methodWireName,
+  slimFixture,
+  slimMethod,
+} from "./fixture.js";
+export type {
+  FixtureClass,
+  FixtureExport,
+  FixtureFactory,
+  FixtureMeta,
+  MethodMeta,
+  SlimFixtureDecorator,
+  SlimMethodDecorator,
+} from "./fixture.js";
 
 // Runtime
 

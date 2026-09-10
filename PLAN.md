@@ -122,6 +122,7 @@ js-slim/
 │  ├─ server.ts
 │  ├─ cli.ts
 │  └─ fixture.ts                       # typed authoring API
+├─ examples/                           # runnable fixtures, executed by the tests
 └─ test/
    ├─ protocol/*.test.ts
    ├─ transport/*.test.ts
@@ -260,7 +261,7 @@ Applied to `make` constructor args and `call`/`callAndAssign` args:
 | `"true"` / `"false"` (case-insensitive) | boolean | `"yes"`/`"no"` stay **strings** (matches Java `ShouldIBuyMilk`) |
 | numeric literal (`/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/`, finite) | number | `"007"` → `7`, `"0.50"` → `0.5`; opt out with `String` |
 | integer beyond `Number.MAX_SAFE_INTEGER` | string (lossless) | use `Long`/BigInt when typed |
-| nested list | array (elements recursion only when typed) | `Array<Number>` metadata coerces elements |
+| nested list | array (elements recursion only when typed) | `listOf(Number)` metadata coerces elements |
 | anything else (incl. literal `"null"`) | string | literal `"null"` stays a string, Java parity |
 
 - `coercion: "strict"` server option disables inference (args stay strings/arrays).
@@ -284,7 +285,9 @@ Resolution for `make` class `eg.Division` against imports (front-first):
 ### `runtime/method-resolver.ts`
 
 - Candidate order: instance → System-Under-Test → libraries top-first.
-- Name matching: exact, then `swapCaseOfFirstLetter` (Java parity); no extra conventions.
+- Name matching: exact, then `swapCaseOfFirstLetter` (Java parity), then a method whose declared
+  metadata (`MethodMeta.name`) matches the requested name. Declared names are matched exactly;
+  only real method names get the swap-case fallback.
 - Arity from `fn.length` (rest args supported); miss returns a `noMethod` marker + sorted available
   method signatures for `NO_METHOD_IN_CLASS` diagnostics.
 - SUT detection: property `sut` / `systemUnderTest`, or metadata `sut: "field"`.
@@ -309,19 +312,49 @@ string and detects Stop/Ignore markers by class/name.
 ### `fixture.ts` — typed authoring API
 
 ```ts
-export type SlimType = typeof String | typeof Number | typeof Boolean | typeof Date | "list" | "map" | "object";
-export interface MethodMeta { name?: string; params?: SlimType[]; returns?: SlimType; }
-export interface FixtureMeta { name?: string; methods?: Record<string, MethodMeta>; sut?: string; factory?: boolean; }
+// Constructors and collection names are both accepted; the string forms are
+// aliases so metadata can be written as plain data.
+export type ConverterKey =
+  | typeof String | typeof Number | typeof BigInt | typeof Boolean | typeof Date
+  | typeof Array | typeof Map | typeof Object
+  | "list" | "map" | "object" | "void";
+/** A list with a declared element type, e.g. `listOf(Number)` for `number[]`. */
+export interface ListSlimType { readonly kind: "list"; readonly element: SlimType; }
+export type SlimType = ConverterKey | ListSlimType;
+export function listOf(element: SlimType): ListSlimType;
 
-export function slimFixture(meta?: FixtureMeta): ClassDecorator;
-export function slimMethod(meta: MethodMeta): MethodDecorator;
-export function fixture(def: { class: Class; methods?: Record<string, MethodMeta>; sut?: string }): Class;
-export function defineFixture(ctor: Class, meta: FixtureMeta): void;
+export interface MethodMeta { name?: string; params?: readonly SlimType[]; returns?: SlimType; }
+export interface FixtureMeta {
+  name?: string;
+  methods?: Record<string, MethodMeta>;
+  sut?: string;
+  factory?: boolean;
+}
+
+export function slimFixture(meta?: FixtureMeta): SlimFixtureDecorator;
+export function slimMethod(meta: MethodMeta): SlimMethodDecorator;
+export function fixture(def: { class: C; name?: string; methods?: Record<string, MethodMeta>; sut?: string; factory?: boolean }): C;
+export function defineFixture(ctor: FixtureExport, meta: FixtureMeta): void;
 ```
 
 - **Standard (stage-3) decorators** — no `reflect-metadata`, no `experimentalDecorators`.
-- Metadata stored on the class under a symbol-keyed static property; the loader reads it.
-- JS users use `fixture(...)` / `defineFixture(...)` directly.
+- Metadata is stored under `Symbol.for`-keyed properties (`FIXTURE_META` on the class or
+  factory, `METHOD_META` on the method function) so the ESM and CJS builds share one key.
+  `getFixtureMeta` also accepts an *instance* and reads its class's metadata.
+- The metadata is **wired into the runtime**, not decorative:
+  - `name` resolves the fixture (`FixtureLoader` accepts an export that declares it) and is
+    used in `NO_METHOD_IN_CLASS` diagnostics.
+  - `sut` names the System Under Test property, overriding the `sut`/`systemUnderTest` heuristic.
+  - `factory: true` calls the export instead of `new`ing it.
+  - `methods[].name` / `slimMethod({name})` declare the FitNesse-facing method name.
+  - `params`/`returns` select converters for arguments and results instead of smart coercion.
+- Metadata lives in `src/converters/slim-type.ts` (`ConverterKey`, `ListSlimType`, `SlimType`,
+  `listOf`) and `src/fixture.ts`, which re-exports the types for authors who import them there.
+- Readers (`getFixtureMeta`, `getOwnMethodMeta`, `getFixtureMethodMeta`, `getMethodMeta`,
+  `methodWireName`, `declaredFixtureName`, `declaredSutName`, `isFactoryFixture`,
+  `inheritFixtureMeta`) are the supported way for other runtime modules to consult metadata.
+- JS users use `fixture(...)` / `defineFixture(...)` directly; there are runnable examples in
+  `examples/` that the test suite executes.
 
 ### `cli.ts`
 
@@ -377,7 +410,7 @@ The committed wiki page defines `!define TEST_SYSTEM {slim}`,
 - [x] 9. Execution context + statement executor + helper library + stop/ignore + tests.
 - [x] 10. Server session loop + error serialization + timeout + tests.
 - [x] 11. CLI + bin + exit codes.
-- [ ] 12. Typed authoring API (`slimFixture`, `slimMethod`, `fixture`, `defineFixture`) + examples.
+- [x] 12. Typed authoring API (`slimFixture`, `slimMethod`, `fixture`, `defineFixture`) + examples.
 - [ ] 13. GitHub Actions CI (quality matrix, e2e, pack).
 - [ ] 14. README + docs: `COMMAND_PATTERN`, TS/JS fixture examples, conversion table, protocol notes.
 

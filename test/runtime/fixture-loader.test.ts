@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { SLIM_ERROR, SlimError } from "../../src/errors.js";
+import { declaredFixtureName, isFactoryFixture } from "../../src/fixture.js";
 import {
   FixtureLoader,
   swapCaseOfFirstLetter,
@@ -222,5 +223,59 @@ describe("FixtureLoader", () => {
     loader.addPath("/root");
 
     expect((await loader.load("Broken")).name).toBe("Fallback");
+  });
+});
+
+const AUTHORING = fileURLToPath(new URL("../fixtures/authoring", import.meta.url));
+const EXAMPLES = fileURLToPath(new URL("../../examples", import.meta.url));
+
+describe("declared fixture names and factory exports", () => {
+  function authoringLoader(): FixtureLoader {
+    const loader = new FixtureLoader({ cwd: AUTHORING, importer: nativeImport });
+    loader.addPath(AUTHORING);
+    return loader;
+  }
+
+  it("resolves an export whose declared name matches the request", async () => {
+    const fixture = await authoringLoader().load("MyAlias");
+
+    expect(fixture.name).toBe("TempConv");
+    expect(declaredFixtureName(fixture)).toBe("MyAlias");
+  });
+
+  it("resolves by declared name even though the class is named differently", async () => {
+    // The file is `MyAlias.js`; the class inside is `TempConv`, so the declared
+    // name is what makes the fixture reachable.
+    await expect(authoringLoader().load("TempConv")).rejects.toThrow(/NO_CLASS TempConv/);
+  });
+
+  it("does not resolve an undeclared alias", async () => {
+    await expect(authoringLoader().load("MyAlias2")).rejects.toThrow(/NO_CLASS MyAlias2/);
+  });
+
+  it("loads a factory export", async () => {
+    const factory = await authoringLoader().load("CounterFactory");
+
+    expect(isFactoryFixture(factory)).toBe(true);
+    const instance = (factory as () => { increment: () => number })();
+    expect(instance.increment()).toBe(1);
+  });
+
+  it("loads the JavaScript example by its fixture name", async () => {
+    const loader = new FixtureLoader({ cwd: EXAMPLES, importer: nativeImport });
+    loader.addPath(EXAMPLES);
+
+    const fixture = await loader.load("Counter");
+    expect(declaredFixtureName(fixture)).toBe("Counter");
+  });
+});
+
+describe("declared names with a module-file root", () => {
+  it("resolves an export by its declared name", async () => {
+    const loader = makeLoader({ cwd: AUTHORING });
+    loader.addPath(join(AUTHORING, "MyAlias.js"));
+
+    const fixture = await loader.load("MyAlias");
+    expect(fixture.name).toBe("TempConv");
   });
 });

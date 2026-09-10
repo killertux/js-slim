@@ -1,4 +1,10 @@
 import { SLIM_ERROR, SlimError, formatSlimMessage } from "../errors.js";
+import {
+  declaredFixtureName,
+  declaredSutName,
+  getFixtureMethodMeta,
+  getOwnMethodMeta,
+} from "../fixture.js";
 import { swapCaseOfFirstLetter } from "./fixture-loader.js";
 
 /** A callable fixture method. */
@@ -29,13 +35,14 @@ export const DEFAULT_SUT_NAMES = ["sut", "systemUnderTest"] as const;
 /**
  * Find a method on a single object by name and argument count.
  *
- * The exact name is tried first, then the `swapCaseOfFirstLetter` variant
- * (Java parity). A method matches when it declares at most `arity` parameters
- * (`fn.length <= arity`) — JavaScript ignores extra arguments, so a
- * `fn.length > arity` mismatch means the call is missing required parameters.
- * `constructor`, accessors and `Object.prototype` members are never fixture
- * methods. Use {@link MethodResolver.resolve} to prefer exact-arity matches
- * across a receiver chain.
+ * The exact name is tried first, then the `swapCaseOfFirstLetter` variant, then
+ * any method declaring the name through its metadata (Java parity plus the
+ * authoring API; see `MethodMeta.name`). A method matches when it declares at
+ * most `arity` parameters (`fn.length <= arity`) — JavaScript ignores extra
+ * arguments, so a `fn.length > arity` mismatch means the call is missing
+ * required parameters. `constructor`, accessors and `Object.prototype` members
+ * are never fixture methods. Use {@link MethodResolver.resolve} to prefer
+ * exact-arity matches across a receiver chain.
  */
 export function findMethodOn(
   target: object,
@@ -53,25 +60,16 @@ export function findMethodOn(
  * and only data (non-accessor) function properties are listed.
  */
 export function listMethods(target: object): MethodInfo[] {
-  const found = new Map<string, number>();
-  let current: object | null = target;
+  const methods: MethodInfo[] = [];
 
-  while (current !== null && current !== Object.prototype) {
-    for (const name of Object.getOwnPropertyNames(current)) {
-      if (name === "constructor" || found.has(name)) {
-        continue;
-      }
-      const descriptor = Object.getOwnPropertyDescriptor(current, name);
-      if (descriptor !== undefined && typeof descriptor.value === "function") {
-        found.set(name, (descriptor.value as FixtureMethod).length);
-      }
+  for (const name of functionNames(target)) {
+    const method = lookupFunction(target, name);
+    if (method !== undefined) {
+      methods.push({ name, arity: method.length });
     }
-    current = Object.getPrototypeOf(current) as object | null;
   }
 
-  return [...found.entries()]
-    .map(([name, arity]) => ({ name, arity }))
-    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return methods.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
 /** Render the available methods as `name(arity)` lines, sorted by name. */
@@ -86,11 +84,19 @@ export async function invokeMethod(match: MethodMatch, args: readonly unknown[])
   return await match.method.call(match.receiver, ...args);
 }
 
-/** Find the System Under Test of an object via its `sut`/`systemUnderTest` property. */
+/** Find the System Under Test of an object via its declared or conventional property. */
 export function findSystemUnderTest(
   target: object,
   names: readonly string[] = DEFAULT_SUT_NAMES,
 ): unknown {
+  // An explicitly declared SUT property wins outright: it is the author saying
+  // which property holds the SUT, so the heuristic must not override it.
+  const declared = declaredSutName(target);
+  if (declared !== undefined) {
+    const value = readProperty(target, declared);
+    return isObjectLike(value) ? value : undefined;
+  }
+
   for (const name of names) {
     const value = readProperty(target, name);
     if (isObjectLike(value)) {
@@ -206,7 +212,64 @@ function findMethod(
       return { name, method };
     }
   }
+
+  return findMethodByDeclaredName(target, methodName, accepts);
+}
+
+/**
+ * Find a method by its declared wire name (`MethodMeta.name`).
+ *
+ * Lets a FitNesse-facing name differ from the JavaScript one — for example
+ * `"sum of"` for `sumOf` — whether the alias is declared with `slimMethod` on
+ * the function or through `FixtureMeta.methods`. Declared names are matched
+ * exactly; only real method names get the `swapCaseOfFirstLetter` fallback.
+ */
+function findMethodByDeclaredName(
+  target: object,
+  wireName: string,
+  accepts: (method: FixtureMethod) => boolean,
+): { name: string; method: FixtureMethod } | undefined {
+  for (const name of functionNames(target)) {
+    const method = lookupFunction(target, name);
+    if (method === undefined || !accepts(method)) {
+      continue;
+    }
+    const declared = getOwnMethodMeta(method)?.name ?? getFixtureMethodMeta(target, name)?.name;
+    if (declared === wireName) {
+      return { name, method };
+    }
+  }
   return undefined;
+}
+
+/**
+ * Own and inherited data-property function names (excluding `constructor`).
+ *
+ * A name defined anywhere in the chain is only reported from the most derived
+ * definition, so a data property shadowing an inherited method hides it — the
+ * same rule `lookupFunction` applies.
+ */
+function functionNames(target: object): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let current: object | null = target;
+
+  while (current !== null && current !== Object.prototype) {
+    for (const name of Object.getOwnPropertyNames(current)) {
+      if (name === "constructor" || seen.has(name)) {
+        continue;
+      }
+      seen.add(name);
+
+      const descriptor = Object.getOwnPropertyDescriptor(current, name);
+      if (descriptor !== undefined && typeof descriptor.value === "function") {
+        names.push(name);
+      }
+    }
+    current = Object.getPrototypeOf(current) as object | null;
+  }
+
+  return names;
 }
 
 /**
@@ -257,6 +320,11 @@ function readProperty(target: object, name: string): unknown {
 }
 
 function constructorName(target: object): string {
+  const declared = declaredFixtureName(target);
+  if (declared !== undefined) {
+    return declared;
+  }
+
   try {
     const constructor = (target as { constructor?: unknown }).constructor;
     if (typeof constructor === "function" && constructor.name.length > 0) {

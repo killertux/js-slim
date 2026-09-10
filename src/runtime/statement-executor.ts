@@ -1,4 +1,5 @@
 import { coerceArgument, toSlimValue } from "../converters/coerce.js";
+import { defaultConverterRegistry, type ConverterRegistry } from "../converters/registry.js";
 import {
   SLIM_ERROR,
   SlimError,
@@ -6,6 +7,7 @@ import {
   formatSlimMessage,
   isStopOrIgnoreError,
 } from "../errors.js";
+import { getMethodMeta, type MethodMeta } from "../fixture.js";
 import type { SlimInstruction } from "../instructions/types.js";
 import type { SlimSerializable, SlimValue } from "../protocol/types.js";
 import { ExecutionContext } from "./execution-context.js";
@@ -24,6 +26,11 @@ export interface StatementExecutorOptions {
   helperLibrary?: boolean;
   /** Per-instruction timeout in seconds. Disabled when unset or <= 0. */
   timeoutSeconds?: number | undefined;
+  /**
+   * Registry used for declared parameter and return types. Defaults to the
+   * shared {@link defaultConverterRegistry}.
+   */
+  converterRegistry?: ConverterRegistry;
 }
 
 /**
@@ -37,12 +44,14 @@ export class StatementExecutor implements ActorHost {
   private readonly executionContext: ExecutionContext;
   private readonly resolver: MethodResolver;
   private readonly timeoutSeconds: number;
+  private readonly converters: ConverterRegistry;
   private stopRequested = false;
 
   constructor(options: StatementExecutorOptions = {}) {
     this.executionContext = options.context ?? new ExecutionContext();
     this.resolver = options.methodResolver ?? new MethodResolver();
     this.timeoutSeconds = options.timeoutSeconds ?? 0;
+    this.converters = options.converterRegistry ?? defaultConverterRegistry;
 
     if (options.helperLibrary !== false) {
       this.installHelperLibrary();
@@ -125,6 +134,10 @@ export class StatementExecutor implements ActorHost {
   /**
    * Invoke a method on an instance, its System Under Test, or a library.
    *
+   * Arguments are converted with the method's declared parameter types when it
+   * has metadata (see `slimMethod` / `FixtureMeta.methods`), and smart-coerced
+   * otherwise.
+   *
    * @throws {SlimError} tagged `NO_INSTANCE` (unknown instance and no library
    *   match) or `NO_METHOD_IN_CLASS` (no matching method).
    */
@@ -133,8 +146,19 @@ export class StatementExecutor implements ActorHost {
     methodName: string,
     args: readonly SlimValue[] = [],
   ): Promise<unknown> {
+    return (await this.invokeResolved(instanceName, methodName, args)).value;
+  }
+
+  /**
+   * Resolve and invoke a method, returning its value together with the metadata
+   * of the resolved method so the result can use the declared return type.
+   */
+  private async invokeResolved(
+    instanceName: string,
+    methodName: string,
+    args: readonly SlimValue[] = [],
+  ): Promise<{ value: unknown; meta: MethodMeta | undefined }> {
     const replaced = this.executionContext.replaceSymbols(args);
-    const converted = replaced.map((value) => coerceArgument(value));
     const targets = this.receiverTargets(instanceName);
 
     const match = this.resolver.resolveInTargets(targets, methodName, replaced.length);
@@ -142,7 +166,12 @@ export class StatementExecutor implements ActorHost {
       throw this.missingMethodError(instanceName, methodName, replaced.length);
     }
 
-    return await invokeMethod(match, converted);
+    const meta = getMethodMeta(match.receiver, match.method, match.name);
+    const converted = replaced.map((value, index) =>
+      coerceArgument(value, meta?.params?.[index] ?? null, this.converters),
+    );
+
+    return { value: await invokeMethod(match, converted), meta };
   }
 
   /** Invoke a method and store its result as a symbol. */
@@ -184,22 +213,22 @@ export class StatementExecutor implements ActorHost {
           return [instruction.id, "OK"];
 
         case "call": {
-          const value = await this.call(
+          const { value, meta } = await this.invokeResolved(
             instruction.instanceName,
             instruction.methodName,
             instruction.args,
           );
-          return [instruction.id, toSlimValue(value)];
+          return [instruction.id, toSlimValue(value, meta?.returns, this.converters)];
         }
 
         case "callAndAssign": {
-          const value = await this.callAndAssign(
-            instruction.symbolName,
+          const { value, meta } = await this.invokeResolved(
             instruction.instanceName,
             instruction.methodName,
             instruction.args,
           );
-          return [instruction.id, toSlimValue(value)];
+          this.assign(instruction.symbolName, value);
+          return [instruction.id, toSlimValue(value, meta?.returns, this.converters)];
         }
 
         case "invalid":
