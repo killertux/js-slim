@@ -89,6 +89,21 @@ export type {
   FixtureLoaderOptions,
   FixtureResolver,
 } from "./runtime/fixture-loader.js";
+export {
+  DEFAULT_SUT_NAMES,
+  MethodResolver,
+  describeMethods,
+  findMethodOn,
+  findSystemUnderTest,
+  invokeMethod,
+  listMethods,
+} from "./runtime/method-resolver.js";
+export type {
+  FixtureMethod,
+  MethodInfo,
+  MethodMatch,
+  MethodResolverOptions,
+} from "./runtime/method-resolver.js";
 
 // Transport
 export { SlimClient, toResultMap } from "./transport/client.js";
