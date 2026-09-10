@@ -2,6 +2,7 @@ import { PassThrough } from "node:stream";
 
 import { describe, expect, it } from "vitest";
 
+import { SlimTransportError } from "../../src/transport/errors.js";
 import { SLIM_HEADER, encodeFrame } from "../../src/transport/frame.js";
 import {
   createOutputTunnel,
@@ -17,6 +18,12 @@ describe("formatTunneledChunk", () => {
     expect(formatTunneledChunk("Hello World\n", "SOUT")).toBe("SOUT.:Hello World\n");
     expect(formatTunneledChunk("a\nb\nc\n", "SOUT")).toBe("SOUT.:a\nSOUT :b\nSOUT :c\n");
     expect(formatTunneledChunk("oops\n", "SERR")).toBe("SERR.:oops\n");
+  });
+
+  it("matches the Java multi-line vector including blank lines", () => {
+    expect(formatTunneledChunk("Hello World\n\nBye\n", "SOUT")).toBe(
+      "SOUT.:Hello World\nSOUT :\nSOUT :Bye\n",
+    );
   });
 
   it("skips empty records", () => {
@@ -113,6 +120,18 @@ describe("createStdioConnection", () => {
 });
 
 describe("installProcessOutputTunnel", () => {
+  it("refuses a second tunnel and allows a fresh one after restore", () => {
+    const restore = installProcessOutputTunnel(() => {});
+    try {
+      expect(() => installProcessOutputTunnel(() => {})).toThrow(SlimTransportError);
+    } finally {
+      restore();
+    }
+
+    const restoreAgain = installProcessOutputTunnel(() => {});
+    restoreAgain();
+  });
+
   it("routes process output through the sink and restores the writers", async () => {
     const tunnel = new PassThrough();
     let captured = "";

@@ -66,6 +66,21 @@ describe("FrameReader", () => {
     expect(await reader.readMessage()).toBeNull();
   });
 
+  it("reads many frames packed into a single chunk", async () => {
+    const reader = readerFromChunks(["000001:a000001:b000001:c"]);
+    expect(await reader.readMessage()).toBe("a");
+    expect(await reader.readMessage()).toBe("b");
+    expect(await reader.readMessage()).toBe("c");
+    expect(await reader.readMessage()).toBeNull();
+  });
+
+  it("rejects a frame larger than the configured maximum", async () => {
+    const reader = new FrameReader(Readable.from([Buffer.from("000005:hello", "utf8")]), {
+      maxFrameBytes: 3,
+    });
+    await expect(reader.readMessage()).rejects.toThrow(SlimTransportError);
+  });
+
   it("reads multibyte UTF-8 payloads", async () => {
     const reader = readerFromChunks([encodeFrame("Köln").toString("utf8")]);
     expect(await reader.readMessage()).toBe("Köln");

@@ -4,7 +4,7 @@ import { deserialize } from "../protocol/deserializer.js";
 import { serialize } from "../protocol/serializer.js";
 import type { SlimList, SlimSerializable, SlimValue } from "../protocol/types.js";
 import { SlimTransportError } from "./errors.js";
-import { BYE_MESSAGE, FrameReader, encodeFrame } from "./frame.js";
+import { BYE_MESSAGE, FrameReader, writeFrame } from "./frame.js";
 
 /** The version prefix of the server's header line, e.g. `Slim -- V0.5`. */
 const HEADER_PREFIX = "Slim -- V";
@@ -29,12 +29,20 @@ export class SlimClient {
     private readonly reader: FrameReader,
     /** The protocol version reported by the server, e.g. `0.5`. */
     readonly protocolVersion: string,
+    private readonly errorState: { current: Error | null },
   ) {}
 
   static async connect(options: SlimClientOptions): Promise<SlimClient> {
     const { host = "127.0.0.1", port, timeoutMs } = options;
     const socket = await connectSocket(host, port, timeoutMs);
     const reader = new FrameReader(socket);
+
+    // Keep a permanent error listener so a peer reset can never surface as an
+    // uncaught exception; the recorded error is surfaced by assertWritable().
+    const errorState: { current: Error | null } = { current: null };
+    socket.on("error", (error: Error) => {
+      errorState.current = error;
+    });
 
     let header: string | null;
     try {
@@ -53,12 +61,13 @@ export class SlimClient {
       throw new SlimTransportError(`Unexpected SLiM header: ${JSON.stringify(header)}`);
     }
 
-    return new SlimClient(socket, reader, header.slice(HEADER_PREFIX.length));
+    return new SlimClient(socket, reader, header.slice(HEADER_PREFIX.length), errorState);
   }
 
   /** Send a batch of instructions and return the response rows. */
   async invoke(instructions: readonly SlimSerializable[]): Promise<SlimList> {
-    this.socket.write(encodeFrame(serialize(instructions)));
+    this.assertWritable();
+    writeFrame(this.socket, serialize(instructions));
 
     const message = await this.reader.readMessage();
     if (message === null) {
@@ -69,7 +78,8 @@ export class SlimClient {
 
   /** Send the `bye` directive. The server is expected to close afterwards. */
   async bye(): Promise<void> {
-    this.socket.write(encodeFrame(BYE_MESSAGE));
+    this.assertWritable();
+    writeFrame(this.socket, BYE_MESSAGE);
   }
 
   /** Close the underlying connection. */
@@ -80,6 +90,16 @@ export class SlimClient {
       });
     }
     this.socket.destroy();
+  }
+
+  private assertWritable(): void {
+    const error = this.errorState.current;
+    if (error !== null) {
+      throw new SlimTransportError(`SLiM connection error: ${error.message}`, { cause: error });
+    }
+    if (this.socket.destroyed || this.socket.writableEnded) {
+      throw new SlimTransportError("SLiM connection is closed");
+    }
   }
 }
 
@@ -104,23 +124,32 @@ export function toResultMap(rows: SlimList): Map<string, SlimValue> {
 function connectSocket(host: string, port: number, timeoutMs?: number): Promise<net.Socket> {
   return new Promise<net.Socket>((resolve, reject) => {
     const socket = net.createConnection({ host, port });
+    let settled = false;
 
-    const onError = (error: Error) => {
+    // Kept attached after connect so a later failure still has a listener; it
+    // becomes a no-op once the connection has been established.
+    socket.on("error", (error: Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       socket.destroy();
       reject(error);
-    };
-
-    socket.once("error", onError);
+    });
 
     if (timeoutMs !== undefined) {
       socket.setTimeout(timeoutMs, () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
         socket.destroy();
         reject(new SlimTransportError(`Timed out connecting to ${host}:${port}`));
       });
     }
 
     socket.once("connect", () => {
-      socket.off("error", onError);
+      settled = true;
       socket.setTimeout(0);
       resolve(socket);
     });

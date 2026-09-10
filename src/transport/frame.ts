@@ -16,6 +16,14 @@ export const BYE_MESSAGE = "bye";
 /** Largest number of digits accepted in a message length prefix. */
 const MAX_LENGTH_PREFIX_DIGITS = 15;
 
+/** Default maximum accepted message size (64 MiB). */
+export const DEFAULT_MAX_FRAME_BYTES = 64 * 1024 * 1024;
+
+export interface FrameReaderOptions {
+  /** Maximum accepted message size in bytes. Defaults to {@link DEFAULT_MAX_FRAME_BYTES}. */
+  maxFrameBytes?: number;
+}
+
 /** A duplex, message-framed SLiM connection. */
 export interface SlimConnection {
   /** Write the un-prefixed version header. */
@@ -65,10 +73,12 @@ export function writeFrame(output: Writable, payload: string): void {
 export class FrameReader {
   private buffer: Buffer = Buffer.alloc(0);
   private readonly iterator: AsyncIterator<Buffer | string>;
+  private readonly maxFrameBytes: number;
   private finished = false;
 
-  constructor(readable: Readable) {
+  constructor(readable: Readable, options: FrameReaderOptions = {}) {
     this.iterator = readable[Symbol.asyncIterator]() as AsyncIterator<Buffer | string>;
+    this.maxFrameBytes = options.maxFrameBytes ?? DEFAULT_MAX_FRAME_BYTES;
   }
 
   /** Read a newline-terminated line (used for the un-prefixed header). */
@@ -130,6 +140,11 @@ export class FrameReader {
     if (!Number.isSafeInteger(length)) {
       throw new SlimTransportError(`Invalid SLiM message length: ${digits}`);
     }
+    if (length > this.maxFrameBytes) {
+      throw new SlimTransportError(
+        `SLiM message length ${length} exceeds the maximum of ${this.maxFrameBytes} bytes`,
+      );
+    }
 
     const total = colon + 1 + length;
     while (this.buffer.length < total) {
@@ -148,7 +163,13 @@ export class FrameReader {
       return false;
     }
 
-    const next = await this.iterator.next();
+    let next: IteratorResult<Buffer | string>;
+    try {
+      next = await this.iterator.next();
+    } catch (error) {
+      throw new SlimTransportError("SLiM stream failed while reading", { cause: error });
+    }
+
     if (next.done) {
       this.finished = true;
       return false;

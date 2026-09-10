@@ -1,6 +1,7 @@
 import type { Readable, Writable } from "node:stream";
 import { Writable as WritableStream } from "node:stream";
 
+import { SlimTransportError } from "./errors.js";
 import { FrameReader, SLIM_HEADER, encodeFrame, type SlimConnection } from "./frame.js";
 
 /** Which tunnel a line of fixture output belongs to. */
@@ -14,6 +15,17 @@ const FIRST_LINE_PREFIX = ".:";
 
 /** Prefix for the continuation lines of a record. */
 const FOLLOWING_LINE_PREFIX = " :";
+
+// Captured at module load so the true writers can always be restored, even if
+// installation is attempted more than once. The bound variants are used for
+// internal writes so protocol frames keep the correct `this`.
+const PRISTINE_STDOUT_WRITE: typeof process.stdout.write = process.stdout.write;
+const PRISTINE_STDERR_WRITE: typeof process.stderr.write = process.stderr.write;
+const writeToStdout = PRISTINE_STDOUT_WRITE.bind(process.stdout);
+const writeToStderr = PRISTINE_STDERR_WRITE.bind(process.stderr);
+
+/** The restore function for the currently installed tunnel, if any. */
+let activeTunnelRestore: (() => void) | null = null;
 
 /**
  * Render a chunk of fixture output in the stdio-mode tunnel format.
@@ -54,10 +66,12 @@ export function createOutputTunnel(sink: TunnelSink, level: TunnelLevel): Writab
  * @returns a function that restores the original writers.
  */
 export function installProcessOutputTunnel(sink: TunnelSink): () => void {
+  if (activeTunnelRestore !== null) {
+    throw new SlimTransportError("SLiM process output is already being tunneled");
+  }
+
   const stdoutTunnel = createOutputTunnel(sink, "SOUT");
   const stderrTunnel = createOutputTunnel(sink, "SERR");
-  const originalStdoutWrite = process.stdout.write;
-  const originalStderrWrite = process.stderr.write;
 
   const patch = (target: NodeJS.WriteStream, tunnel: Writable): void => {
     const patched = (chunk: unknown, encoding?: unknown, callback?: unknown): boolean => {
@@ -79,10 +93,21 @@ export function installProcessOutputTunnel(sink: TunnelSink): () => void {
   patch(process.stdout, stdoutTunnel);
   patch(process.stderr, stderrTunnel);
 
-  return () => {
-    process.stdout.write = originalStdoutWrite;
-    process.stderr.write = originalStderrWrite;
+  let restored = false;
+  const restore = (): void => {
+    if (restored) {
+      return;
+    }
+    restored = true;
+    process.stdout.write = PRISTINE_STDOUT_WRITE;
+    process.stderr.write = PRISTINE_STDERR_WRITE;
+    if (activeTunnelRestore === restore) {
+      activeTunnelRestore = null;
+    }
   };
+
+  activeTunnelRestore = restore;
+  return restore;
 }
 
 export interface StdioConnectionOptions {
@@ -113,9 +138,14 @@ export function createStdioConnection(options: StdioConnectionOptions = {}): Sli
   const tunnel = options.tunnel ?? process.stderr;
 
   // Capture the raw writers before any patching so protocol framing and tunnel
-  // output cannot recurse through the patched methods.
-  const rawOutputWrite = output.write.bind(output) as (chunk: string | Uint8Array) => boolean;
-  const rawTunnelWrite = tunnel.write.bind(tunnel) as (chunk: string) => boolean;
+  // output cannot recurse through the patched methods. When writing to the real
+  // process streams, always use the pristine writers captured at module load.
+  const rawOutputWrite = (
+    output === process.stdout ? writeToStdout : output.write.bind(output)
+  ) as (chunk: string | Uint8Array) => boolean;
+  const rawTunnelWrite = (
+    tunnel === process.stderr ? writeToStderr : tunnel.write.bind(tunnel)
+  ) as (chunk: string) => boolean;
 
   const reader = new FrameReader(input);
   const shouldRedirect = options.redirectProcessOutput ?? usingRealStreams;

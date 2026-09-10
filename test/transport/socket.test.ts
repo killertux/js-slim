@@ -103,4 +103,26 @@ describe("startSocketServer", () => {
       await server.close();
     }
   });
+
+  it("survives a handler that throws synchronously", async () => {
+    const server = await startSocketServer({
+      port: 0,
+      daemon: true,
+      handleConnection: () => {
+        throw new Error("boom");
+      },
+    });
+
+    try {
+      await expect(SlimClient.connect({ port: server.port })).rejects.toThrow();
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("is safe to close twice", async () => {
+    const server = await startSocketServer({ port: 0, handleConnection: echoConnection });
+    await server.close();
+    await server.close();
+  });
 });

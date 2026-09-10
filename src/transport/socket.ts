@@ -1,7 +1,7 @@
 import net from "node:net";
 import type { AddressInfo } from "node:net";
 
-import { FrameReader, SLIM_HEADER, encodeFrame, type SlimConnection } from "./frame.js";
+import { FrameReader, writeFrame, writeHeader, type SlimConnection } from "./frame.js";
 
 export interface SocketServerOptions {
   /** TCP port to listen on. Use `0` to let the OS choose a free port. */
@@ -19,6 +19,8 @@ export interface SocketServerOptions {
    * (writing the header, reading messages, responding, honouring `bye`).
    */
   handleConnection: (connection: SlimConnection) => void | Promise<void>;
+  /** Invoked for server-level errors that happen after the server is listening. */
+  onServerError?: (error: Error) => void;
 }
 
 export interface RunningSocketServer {
@@ -37,7 +39,7 @@ export interface RunningSocketServer {
 export async function startSocketServer(
   options: SocketServerOptions,
 ): Promise<RunningSocketServer> {
-  const { port, host = "127.0.0.1", daemon = false, handleConnection } = options;
+  const { port, host = "127.0.0.1", daemon = false, handleConnection, onServerError } = options;
 
   const sockets = new Set<net.Socket>();
   const tasks = new Set<Promise<void>>();
@@ -67,18 +69,16 @@ export async function startSocketServer(
   });
 
   await new Promise<void>((resolve, reject) => {
-    const onError = (error: Error) => {
-      server.off("listening", onListening);
-      reject(error);
-    };
-    const onListening = () => {
-      server.off("error", onError);
-      resolve();
-    };
-
-    server.once("error", onError);
-    server.once("listening", onListening);
-    server.listen(port, host);
+    // Keep a persistent error listener: after the server is listening, errors
+    // must not become uncaught exceptions that would take down a daemon.
+    server.on("error", (error: Error) => {
+      if (server.listening) {
+        onServerError?.(error);
+      } else {
+        reject(error);
+      }
+    });
+    server.listen(port, host, () => resolve());
   });
 
   const address = server.address() as AddressInfo | null;
@@ -103,13 +103,13 @@ export function createSocketConnection(socket: net.Socket): SlimConnection {
 
   return {
     writeHeader() {
-      socket.write(SLIM_HEADER);
+      writeHeader(socket);
     },
     readMessage() {
       return reader.readMessage();
     },
     writeMessage(payload: string) {
-      socket.write(encodeFrame(payload));
+      writeFrame(socket, payload);
     },
     async close() {
       socket.end();

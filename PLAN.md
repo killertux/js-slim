@@ -82,8 +82,9 @@ that works from both TypeScript and plain JavaScript.
   abort skips remaining statements in the batch.
 
 **Stdio mode (port 1)**
-- SUT stdout/stderr tunneled over real stderr: first line `SOUT :`/`SERR :`, continuations
-  `SOUT.:`/`SERR.:`. Node must capture `process.stdout.write` + `console.*` and re-emit to stderr.
+- SUT stdout/stderr tunneled over real stderr: first line `SOUT.:`/`SERR.:`, continuations
+  `SOUT :`/`SERR :` (matches `LoggingOutputStream`; the protocol page states the reverse).
+  Node must capture `process.stdout.write` + `console.*` and re-emit to stderr.
 
 ## Architecture
 
