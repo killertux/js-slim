@@ -81,6 +81,24 @@ class LibraryFixture {
   }
 }
 
+class ListFixture {
+  echo(value: unknown): unknown {
+    return value;
+  }
+}
+
+class StopConstructorFixture {
+  constructor() {
+    throw new StopTestError("constructor stop");
+  }
+}
+
+class ThrowingConstructorFixture {
+  constructor() {
+    throw new Error("thrown message");
+  }
+}
+
 function setup(): {
   executor: StatementExecutor;
   register: (name: string, ctor: FixtureConstructor) => void;
@@ -265,6 +283,50 @@ describe("StatementExecutor", () => {
 
     const results = await run(executor, [["m1", "make", "testSlim", "NoSuchFixture"]]);
     expect(String(results[0]?.[1])).toContain("COULD_NOT_INVOKE_CONSTRUCTOR NoSuchFixture[0]");
+  });
+
+  it("passes a constructor's own exception through", async () => {
+    const { executor, register } = setup();
+    register("ThrowingConstructorFixture", ThrowingConstructorFixture);
+
+    const results = await run(executor, [["m1", "make", "x", "ThrowingConstructorFixture"]]);
+    const value = String(results[0]?.[1]);
+
+    expect(value).toContain("thrown message");
+    expect(value).not.toContain("COULD_NOT_INVOKE_CONSTRUCTOR");
+  });
+
+  it("keeps the stop marker for a constructor that aborts the test", async () => {
+    const { executor, register } = setup();
+    register("StopConstructorFixture", StopConstructorFixture);
+
+    const results = await run(executor, [
+      ["m1", "make", "x", "StopConstructorFixture"],
+      ["m2", "make", "y", "StopConstructorFixture"],
+    ]);
+
+    expect(results).toHaveLength(1);
+    expect(String(results[0]?.[1])).toContain("__EXCEPTION__:ABORT_SLIM_TEST:");
+  });
+
+  it("smart-coerces scalars and passes lists through", async () => {
+    const { executor, register } = setup();
+    register("ListFixture", ListFixture);
+
+    const results = await run(executor, [
+      ["m1", "make", "f", "ListFixture"],
+      ["c1", "call", "f", "echo", "007"],
+      ["c2", "call", "f", "echo", ["a", "b"]],
+    ]);
+
+    expect(results[1]).toEqual(["c1", "7"]);
+    expect(results[2]).toEqual(["c2", ["a", "b"]]);
+  });
+
+  it("returns null for unset symbols", () => {
+    const { executor } = setup();
+    expect(executor.getSymbol("missing")).toBeNull();
+    expect(executor.getSymbolObject("missing")).toBeNull();
   });
 
   it("continues after a normal error", async () => {

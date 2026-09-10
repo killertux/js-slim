@@ -103,12 +103,18 @@ describe("formatException", () => {
   it("formats abort and ignore errors with their marker", () => {
     expect(formatException(new StopTestError("why"))).toBe(`${ABORT_SLIM_TEST_TAG}message:<<why>>`);
     expect(formatException(new StopSuiteError())).toBe(ABORT_SLIM_SUITE_TAG);
-    expect(formatException(new IgnoreScriptTestError("skip"))).toBe(
-      `${IGNORE_SCRIPT_TEST_TAG}message:<<skip>>`,
-    );
-    expect(formatException(new IgnoreAllTestsError("all"))).toBe(
-      `${IGNORE_ALL_TESTS_TAG}message:<<all>>`,
-    );
+    expect(formatException(new IgnoreScriptTestError("skip"))).toBe(IGNORE_SCRIPT_TEST_TAG);
+    expect(formatException(new IgnoreAllTestsError("all"))).toBe(IGNORE_ALL_TESTS_TAG);
+  });
+
+  it("wraps a pre-wrapped message only once", () => {
+    const error = new SlimError(formatSlimMessage("Foo", SLIM_ERROR.NO_CLASS), {
+      tag: SLIM_ERROR.NO_CLASS,
+    });
+    const formatted = formatException(error);
+
+    expect(formatted.startsWith(`${EXCEPTION_TAG}message:<<NO_CLASS Foo>>`)).toBe(true);
+    expect(formatted.match(/message:<</g)).toHaveLength(1);
   });
 
   it("includes the cause chain", () => {

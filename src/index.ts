@@ -67,6 +67,7 @@ export {
   StringConverter,
   VOID_TAG,
   VoidConverter,
+  coerceArgument,
   coerceValue,
   defaultConverterRegistry,
   formatDate,

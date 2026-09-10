@@ -144,10 +144,10 @@ export function formatException(error: unknown): string {
     return exceptionMarker(ABORT_SLIM_SUITE_TAG, rawMessage(error));
   }
   if (isIgnoreScriptTestError(error)) {
-    return exceptionMarker(IGNORE_SCRIPT_TEST_TAG, rawMessage(error));
+    return IGNORE_SCRIPT_TEST_TAG;
   }
   if (isIgnoreAllTestsError(error)) {
-    return exceptionMarker(IGNORE_ALL_TESTS_TAG, rawMessage(error));
+    return IGNORE_ALL_TESTS_TAG;
   }
 
   return `${EXCEPTION_TAG}${errorMessage(error)}${stackText(error)}`;
@@ -178,17 +178,36 @@ function errorTypeName(error: unknown): string {
 }
 
 function stackText(error: unknown): string {
-  const parts: string[] = [];
-  const seen = new Set<unknown>();
-  let current: unknown = error;
-
-  while (current instanceof Error && !seen.has(current)) {
-    seen.add(current);
-    if (typeof current.stack === "string" && current.stack.length > 0) {
-      parts.push(current.stack);
-    }
-    current = current.cause;
+  if (!(error instanceof Error) || typeof error.stack !== "string") {
+    return "";
   }
 
-  return parts.length > 0 ? `\n${parts.join("\nCaused by: ")}` : "";
+  const parts: string[] = [];
+  const frames = framesOf(error);
+  if (frames.length > 0) {
+    parts.push(frames);
+  }
+
+  // Some runtimes already append the cause chain to `stack`; do not repeat it.
+  if (!error.stack.includes("Caused by:")) {
+    const seen = new Set<unknown>();
+    let cause: unknown = error.cause;
+    while (cause instanceof Error && !seen.has(cause)) {
+      seen.add(cause);
+      parts.push(`Caused by: ${cause.name}: ${cause.message}${framesOf(cause)}`);
+      cause = cause.cause;
+    }
+  }
+
+  return parts.length > 0 ? `\n${parts.join("\n")}` : "";
+}
+
+/** The `at …` frames of a stack, without the duplicated `Name: message` header. */
+function framesOf(error: Error): string {
+  if (typeof error.stack !== "string") {
+    return "";
+  }
+  const lines = error.stack.split("\n");
+  const firstFrame = lines.findIndex((line) => line.trimStart().startsWith("at "));
+  return firstFrame < 0 ? "" : `\n${lines.slice(firstFrame).join("\n")}`;
 }

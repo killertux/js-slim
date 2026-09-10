@@ -95,10 +95,26 @@ export class StatementExecutor implements ActorHost {
       return await this.executionContext.create(instanceName, className, args);
     } catch (error) {
       this.checkForStop(error);
-      throw new SlimError(
-        formatSlimMessage(`${className}[${args.length}]`, SLIM_ERROR.COULD_NOT_INVOKE_CONSTRUCTOR),
-        { tag: SLIM_ERROR.COULD_NOT_INVOKE_CONSTRUCTOR, cause: error },
-      );
+
+      // A constructor (or the fixture it calls) may abort the test itself; keep
+      // the marker intact rather than reporting it as a construction failure.
+      if (isStopOrIgnoreError(error)) {
+        throw error;
+      }
+
+      // Only a class that could not be loaded is reported as a construction
+      // failure; anything thrown by the constructor body passes through.
+      if (error instanceof SlimError && error.tag === SLIM_ERROR.NO_CLASS) {
+        throw new SlimError(
+          formatSlimMessage(
+            `${className}[${args.length}]`,
+            SLIM_ERROR.COULD_NOT_INVOKE_CONSTRUCTOR,
+          ),
+          { tag: SLIM_ERROR.COULD_NOT_INVOKE_CONSTRUCTOR, cause: error },
+        );
+      }
+
+      throw error;
     }
   }
 
