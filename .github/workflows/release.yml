@@ -33,12 +33,32 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
 
-      - name: Use Node 22
-        uses: actions/setup-node@v4
+      # Node 24, not 22: the OIDC exchange needs npm >= 11.5.1 and Node 22
+      # bundles npm 10, which silently falls back to looking for a token and
+      # fails with ENEEDAUTH. `actions/setup-node@v6` matches npm's own docs.
+      - name: Use Node 24 (ships npm 11)
+        uses: actions/setup-node@v6
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: pnpm
           registry-url: https://registry.npmjs.org
+
+      # Fail fast and say why, instead of a bare ENEEDAUTH from the publish step.
+      - name: Check that the npm CLI supports trusted publishing
+        run: |
+          node -e '
+            const { execSync } = require("node:child_process");
+            const version = execSync("npm --version").toString().trim();
+            const [major, minor] = version.split(".").map(Number);
+            if (major < 11 || (major === 11 && minor < 5)) {
+              console.error(
+                `npm ${version} cannot publish via OIDC (needs >= 11.5.1). ` +
+                  "Node 22 bundles npm 10, which looks for a token instead and fails with ENEEDAUTH.",
+              );
+              process.exit(1);
+            }
+            console.log(`npm ${version} supports trusted publishing`);
+          '
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
@@ -102,14 +122,31 @@ jobs:
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
-# Authentication — pick one:
+# Authentication
 #
-#   1. A granular npm token with read/write access to `@killertux/js-slim` and
-#      "bypass 2FA" enabled, stored as the `NPM_TOKEN` repository secret. Note
-#      that trusted publishing is configured on an *existing* package, so the
-#      very first version must be published with a token (or locally).
-#   2. npm trusted publishing: after 0.1.0 exists, add this repository plus the
-#      workflow file name (`release.yml`) as a trusted publisher in the package's
-#      settings on npmjs.com, then delete the `NPM_TOKEN` secret. The job needs
-#      no token at all. If you give the trusted publisher an environment name,
-#      add the same `environment:` to this job or the OIDC exchange is rejected.
+# A trusted publisher cannot be configured for a package that does not exist yet
+# (npm/cli#8544), so the very first version has to be published once outside this
+# workflow. After that, this job publishes with no stored credential at all:
+#
+#   # 1. once, from a logged-in session (session auth, no long-lived token):
+#   npm login
+#   #    bootstrap the package name with a throwaway version, kept off `latest`
+#   #    so nobody ever installs it:
+#   mkdir -p /tmp/js-slim-bootstrap && cd /tmp/js-slim-bootstrap
+#   printf '%s' '{"name":"@killertux/js-slim","version":"0.0.0","license":"MIT"}' > package.json
+#   npm publish --access public --tag bootstrap
+#   cd - && rm -rf /tmp/js-slim-bootstrap
+#
+#   # 2. register this workflow as the trusted publisher (npm >= 11.15, 2FA on):
+#   npm trust github @killertux/js-slim --repo killertux/js-slim \
+#     --file release.yml --allow-publish
+#   #    (the website equivalent is the package's Settings -> Trusted Publisher;
+#   #     if you set an Environment there, add the same `environment:` here)
+#
+#   # 3. publish for real by pushing a matching tag:
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Alternatively, publish 0.1.0 directly with a granular token (`NPM_TOKEN`, with
+# 2FA bypass) instead of the stub — then configure the trusted publisher and
+# delete the secret. Keep both paths separate: an empty NODE_AUTH_TOKEN is a
+# *value* to npm and defeats the OIDC exchange.
