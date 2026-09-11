@@ -1,0 +1,92 @@
+name: Release
+
+# Publishing is triggered by a version tag (`v0.1.0`) or manually. A manual run
+# defaults to a dry run, so the packaging path can be exercised without
+# publishing.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: "Package and verify without publishing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  # Required for the provenance attestation (`npm publish --provenance`).
+  id-token: write
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+
+      # Fail on v1.2.3 vs package.json 1.2.4 rather than publishing a surprise.
+      - name: Check that the tag matches the package version
+        if: github.event_name == 'push'
+        run: |
+          expected="v$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "${expected}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package version ${expected}" >&2
+            exit 1
+          fi
+          echo "Tag ${GITHUB_REF_NAME} matches ${expected}"
+
+      - name: Verify the packed tarball
+        run: node scripts/verify-package.mjs
+
+      # `prepublishOnly` rebuilds and re-tests, so what ships is what CI validated.
+      - name: Publish (or dry run)
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] || [ "${{ inputs.dryRun }}" = "false" ]; then
+            npm publish --access public --provenance
+          else
+            echo "Dry run: packaging only"
+            npm publish --dry-run --access public
+          fi
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Release"
+            echo
+            echo "- package: \`$(node -p "require('./package.json').name")@$(node -p "require('./package.json').version")\`"
+            echo "- trigger: \`${GITHUB_EVENT_NAME}\`"
+            if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+              echo "- published from tag \`${GITHUB_REF_NAME}\` with provenance"
+            else
+              echo "- dry run (packaged and verified, not published)"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+# Publishing needs npm credentials. Either:
+#
+#   1. Trusted publishing (recommended, no secret): on npmjs.com, open the
+#      package's Settings -> Trusted Publisher and add this repository plus the
+#      workflow file name (`release.yml`). Then delete the NODE_AUTH_TOKEN env
+#      above; `npm publish --provenance` authenticates through the OIDC token.
+#   2. An automation token: create a granular token with read/write access to
+#      `@killertux/js-slim` and store it as the `NPM_TOKEN` repository secret.
