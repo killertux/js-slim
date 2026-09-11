@@ -21,6 +21,9 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
+    // Embed the sources in the maps: `src/` is not published, so without
+    // this the shipped maps would point at files consumers do not have.
+    "inlineSources": true,
 
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,

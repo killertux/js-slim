@@ -48,7 +48,9 @@
     "docs",
     "CHANGELOG.md"
   ],
-  "sideEffects": false,
+  "sideEffects": [
+    "./dist/esm/cli.js"
+  ],
   "keywords": [
     "fitnesse",
     "slim",

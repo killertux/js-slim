@@ -16,9 +16,13 @@ const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const DOCS_DIR = join(REPO_ROOT, "docs");
 const PACKAGE_NAME = "@killertux/js-slim";
 
+/** Absolute links into this repository, checked back against the filesystem. */
+const REPO_URL = "https://github.com/killertux/js-slim/blob/main/";
+
 /** The shipped markdown files, README first. */
 const MARKDOWN_FILES = [
   join(REPO_ROOT, "README.md"),
+  join(REPO_ROOT, "CHANGELOG.md"),
   ...readdirSync(DOCS_DIR)
     .filter((name) => name.endsWith(".md"))
     .sort()
@@ -71,11 +75,21 @@ describe("documentation", () => {
     expect(MARKDOWN_FILES.length).toBeGreaterThanOrEqual(3);
   });
 
-  it.each(MARKDOWN_FILES)("has no broken relative link in %s", (path) => {
+  it.each(MARKDOWN_FILES)("has no broken link in %s", (path) => {
     const broken: string[] = [];
 
     for (const match of markdown(path).matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
       const target = (match[1] ?? "").trim();
+
+      // Links into this repository are absolute (they must work from the npm
+      // package page too), so map them back to a path and check that.
+      if (target.startsWith(REPO_URL)) {
+        const relative = (target.slice(REPO_URL.length).split("#")[0] ?? "").replace(/\/$/, "");
+        if (relative.length > 0 && !existsSync(join(REPO_ROOT, relative))) {
+          broken.push(`${target} -> ${relative}`);
+        }
+        continue;
+      }
       if (/^(https?:|mailto:|#)/.test(target)) {
         continue;
       }

@@ -30,9 +30,8 @@ jobs:
       matrix:
         # Node 20 is deliberately absent: this repo's toolchain is pnpm 11,
         # which needs Node >= 22.13 (it uses `node:sqlite`), so `setup-node`
-        # with `cache: pnpm` cannot even complete the leg. The published
-        # artifact itself still runs on Node 20 — see the README's supported
-        # versions.
+        # with `cache: pnpm` cannot even complete the leg. `engines` declares
+        # the same floor; see the README's supported versions.
         node: ["22.x", "24.x"]
     steps:
       - uses: actions/checkout@v4
