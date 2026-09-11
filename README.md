@@ -302,6 +302,44 @@ pnpm build
 node scripts/verify-package.mjs   # installs the packed tarball and checks exports, types and the bin
 ```
 
+### Releasing
+
+Releases are tag-driven and published by CI with provenance — no tokens or secrets are stored
+anywhere:
+
+```sh
+# 1. bump `version` in package.json and add a CHANGELOG.md entry
+# 2. merge to main
+git tag -a v0.1.0 -m "js-slim 0.1.0"
+git push origin v0.1.0
+```
+
+`.github/workflows/release.yml` then installs, builds, tests, verifies the packed tarball, checks
+that the tag matches `package.json`, and publishes with `--access public --provenance` through npm
+[trusted publishing](https://docs.npmjs.com/trusted-publishers) (OIDC).
+
+Worth knowing when it is your turn:
+
+- **The job needs Node 22.13 or newer** (it runs on Node 24). Trusted publishing needs **npm ≥
+  11.5.1**, and Node 22 bundles npm 10, which cannot perform the OIDC exchange: npm then looks for a
+  token it does not have and fails with a bare `ENEEDAUTH`. The workflow asserts the npm version and
+  explains this if it is too old.
+- **A manual run is a dry run.** Dispatching the workflow only packages and verifies; publishing
+  requires a tag push. Publishing is irreversible, so an accidental click must not be able to do it.
+- **The tag must match `package.json`.** The guard fails before anything is uploaded, because a
+  published version can never be reused.
+- **`NPM_TOKEN` is not required.** If that secret is ever added, the token path takes precedence;
+  delete it to return to OIDC. An _empty_ `NODE_AUTH_TOKEN` is a value to npm and defeats the OIDC
+  exchange, which is why the token and OIDC paths are separate steps.
+- **The trusted publisher** for this package is repository `killertux/js-slim`, workflow
+  `release.yml`, permission _publish_. Inspect it with `npm trust list @killertux/js-slim` (needs a
+  2FA approval too).
+- **A failed publish can simply be retried** with _Re-run failed jobs_ on the tag's run; the tag
+  never moves.
+- `0.0.0` is a bootstrap placeholder under the `bootstrap` dist-tag: a trusted publisher can only be
+  configured for a package that already exists, so the first version had to be published once outside
+  CI. `latest` points at the real release.
+
 ## License
 
 MIT
