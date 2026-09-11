@@ -44,9 +44,13 @@
     "js-slim": "./dist/esm/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "docs",
+    "CHANGELOG.md"
   ],
-  "sideEffects": false,
+  "sideEffects": [
+    "./dist/esm/cli.js"
+  ],
   "keywords": [
     "fitnesse",
     "slim",
@@ -54,6 +58,9 @@
     "test-harness",
     "typescript"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "clean": "node scripts/clean.mjs",
     "build": "pnpm run clean && pnpm run build:esm && pnpm run build:cjs",
@@ -68,7 +75,8 @@
     "coverage": "vitest run --coverage",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "prepublishOnly": "pnpm run build && pnpm test"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

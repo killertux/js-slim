@@ -62,7 +62,7 @@ export class Calculator {
 ```
 
 **2. Point FitNesse at the CLI.** In a wiki page (see
-[docs/fitnesse-setup.md](./docs/fitnesse-setup.md) for the full guide):
+[docs/fitnesse-setup.md](https://github.com/killertux/js-slim/blob/main/docs/fitnesse-setup.md) for the full guide):
 
 ```text
 !define TEST_SYSTEM {slim}
@@ -82,7 +82,7 @@ not contain a port placeholder. Omit `SLIM_PORT` entirely to use stdin/stdout pi
 TCP.
 
 > **Two FitNesse syntax traps** that cost us real debugging time, both explained in
-> [docs/fitnesse-setup.md](./docs/fitnesse-setup.md): script-table action rows alternate
+> [docs/fitnesse-setup.md](https://github.com/killertux/js-slim/blob/main/docs/fitnesse-setup.md): script-table action rows alternate
 > method/argument cells (so multi-argument calls need `|add;|2|3|`), and CamelCase fixture names are
 > auto-linked as WikiWords (escape them as `!-MyFixture-!`).
 
@@ -211,9 +211,9 @@ delegating methods.
 
 ## Documentation
 
-- [docs/fitnesse-setup.md](./docs/fitnesse-setup.md) — wiring FitNesse: `COMMAND_PATTERN`, pipe vs
+- [docs/fitnesse-setup.md](https://github.com/killertux/js-slim/blob/main/docs/fitnesse-setup.md) — wiring FitNesse: `COMMAND_PATTERN`, pipe vs
   TCP, script/decision tables, and the syntax traps.
-- [docs/protocol-notes.md](./docs/protocol-notes.md) — the wire protocol, error format, timeouts,
+- [docs/protocol-notes.md](https://github.com/killertux/js-slim/blob/main/docs/protocol-notes.md) — the wire protocol, error format, timeouts,
   the pipe-mode output tunnel, and the differences from Java's FitNesse.
 
 ## Library API
@@ -245,7 +245,7 @@ Beyond the entry points above: `parseInstruction` / instruction types, `serializ
 `installProcessOutputTunnel`), `StatementExecutor` / `ExecutionContext` / `VariableStore` /
 `MethodResolver` / `FixtureLoader`, the converter registry, and the fixture authoring API
 (`slimFixture`, `slimMethod`, `fixture`, `defineFixture`, `listOf`). Every export is listed in
-[`src/index.ts`](./src/index.ts).
+[`src/index.ts`](https://github.com/killertux/js-slim/blob/main/src/index.ts).
 
 ## Differences from Java FitNesse
 

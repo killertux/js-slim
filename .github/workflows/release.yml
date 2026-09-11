@@ -1,0 +1,152 @@
+name: Release
+
+# Publishing happens on a version tag (`v0.1.0`). The manual trigger only
+# packages and verifies, so a manual run can never publish by accident.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Required for the provenance attestation (`npm publish --provenance`).
+  id-token: write
+
+# Never cancel a publish half-way. A duplicate tag push just loses the race and
+# fails on the already-published version.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # `secrets` is not available in `if:` expressions, so funnel the presence
+      # check through `env` (which is) and pick the auth path in the step's `if`.
+      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      # Node 24, not 22: the OIDC exchange needs npm >= 11.5.1 and Node 22
+      # bundles npm 10, which silently falls back to looking for a token and
+      # fails with ENEEDAUTH. `actions/setup-node@v6` matches npm's own docs.
+      - name: Use Node 24 (ships npm 11)
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24.x"
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      # Fail fast and say why, instead of a bare ENEEDAUTH from the publish step.
+      - name: Check that the npm CLI supports trusted publishing
+        run: |
+          node -e '
+            const { execSync } = require("node:child_process");
+            const version = execSync("npm --version").toString().trim();
+            const [major, minor] = version.split(".").map(Number);
+            if (major < 11 || (major === 11 && minor < 5)) {
+              console.error(
+                `npm ${version} cannot publish via OIDC (needs >= 11.5.1). ` +
+                  "Node 22 bundles npm 10, which looks for a token instead and fails with ENEEDAUTH.",
+              );
+              process.exit(1);
+            }
+            console.log(`npm ${version} supports trusted publishing`);
+          '
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+
+      # Fail on a tag that disagrees with package.json rather than publishing a
+      # version nobody expected: a published version can never be reused.
+      - name: Check that the tag matches the package version
+        if: github.event_name == 'push'
+        run: |
+          expected="v$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "${expected}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package version ${expected}" >&2
+            exit 1
+          fi
+          echo "Tag ${GITHUB_REF_NAME} matches ${expected}"
+
+      - name: Verify the packed tarball
+        run: node scripts/verify-package.mjs
+
+      # Both publish steps below rely on `prepublishOnly`, which rebuilds and
+      # re-runs the suite, so the tarball always holds a fresh, tested build.
+
+      - name: Publish with an npm token
+        id: publish_token
+        if: >-
+          github.event_name == 'push' && github.ref_type == 'tag' &&
+          env.HAS_NPM_TOKEN == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+
+      # Trusted publishing needs no secret: npm exchanges the job's OIDC token
+      # for a short-lived credential. Keep this step's environment free of
+      # NODE_AUTH_TOKEN, since an empty token defeats the exchange.
+      - name: Publish via npm trusted publishing
+        id: publish_oidc
+        if: >-
+          github.event_name == 'push' && github.ref_type == 'tag' &&
+          env.HAS_NPM_TOKEN != 'true'
+        run: npm publish --access public --provenance
+
+      - name: Dry run (manual trigger)
+        if: github.event_name != 'push'
+        run: npm publish --dry-run --access public
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Release"
+            echo
+            echo "- package: \`$(node -p "require('./package.json').name")@$(node -p "require('./package.json').version")\`"
+            echo "- trigger: \`${GITHUB_EVENT_NAME}\`"
+            if [ "${GITHUB_EVENT_NAME}" != "push" ]; then
+              echo "- **dry run**: packaged and verified, nothing published"
+            elif [ "${{ steps.publish_token.outcome }}" = "success" ] || [ "${{ steps.publish_oidc.outcome }}" = "success" ]; then
+              echo "- **published** from tag \`${GITHUB_REF_NAME}\` with provenance"
+            else
+              echo "- publish did not succeed (see the step logs above)"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+# Authentication
+#
+# A trusted publisher cannot be configured for a package that does not exist yet
+# (npm/cli#8544), so the very first version has to be published once outside this
+# workflow. After that, this job publishes with no stored credential at all:
+#
+#   # 1. once, from a logged-in session (session auth, no long-lived token):
+#   npm login
+#   #    bootstrap the package name with a throwaway version, kept off `latest`
+#   #    so nobody ever installs it:
+#   mkdir -p /tmp/js-slim-bootstrap && cd /tmp/js-slim-bootstrap
+#   printf '%s' '{"name":"@killertux/js-slim","version":"0.0.0","license":"MIT"}' > package.json
+#   npm publish --access public --tag bootstrap
+#   cd - && rm -rf /tmp/js-slim-bootstrap
+#
+#   # 2. register this workflow as the trusted publisher (npm >= 11.15, 2FA on):
+#   npm trust github @killertux/js-slim --repo killertux/js-slim \
+#     --file release.yml --allow-publish
+#   #    (the website equivalent is the package's Settings -> Trusted Publisher;
+#   #     if you set an Environment there, add the same `environment:` here)
+#
+#   # 3. publish for real by pushing a matching tag:
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Alternatively, publish 0.1.0 directly with a granular token (`NPM_TOKEN`, with
+# 2FA bypass) instead of the stub — then configure the trusted publisher and
+# delete the secret. Keep both paths separate: an empty NODE_AUTH_TOKEN is a
+# *value* to npm and defeats the OIDC exchange.

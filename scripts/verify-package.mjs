@@ -73,6 +73,20 @@ function main() {
       !existsSync(join(installed, "dist", "cjs", "cli.js")),
     );
 
+    // The `files` list also ships the docs and the changelog; a regression there
+    // would otherwise only be noticed by a reader of the npm page.
+    for (const relative of [
+      "README.md",
+      "LICENSE",
+      "CHANGELOG.md",
+      "docs/fitnesse-setup.md",
+      "docs/protocol-notes.md",
+    ]) {
+      check(`${relative} ships`, existsSync(join(installed, relative)));
+    }
+    check("PLAN.md is not shipped", !existsSync(join(installed, "PLAN.md")));
+    check("the TypeScript sources are not shipped", !existsSync(join(installed, "src")));
+
     // The version in `src/index.ts` must match the published `package.json`.
     const installedVersion = JSON.parse(
       readFileSync(join(installed, "package.json"), "utf8"),
