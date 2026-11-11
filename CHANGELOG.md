@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-11-11
+
 Namespaced fixtures on a persistent server (one process serving many spec files, as Temoc's
 `persistent_server` does).
 
@@ -69,5 +71,6 @@ The first release: a complete SLiM server for FitNesse, plus the library it is b
   `node:sqlite`.
 - Zero runtime dependencies. The core needs only Node built-ins.
 
-[Unreleased]: https://github.com/killertux/js-slim/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/killertux/js-slim/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/killertux/js-slim/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/killertux/js-slim/releases/tag/v0.1.0
