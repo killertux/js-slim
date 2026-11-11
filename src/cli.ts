@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
+import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { FixtureLoader } from "./runtime/fixture-loader.js";
+import { FixtureLoader, type FixtureLoaderOptions } from "./runtime/fixture-loader.js";
 import { SlimServer } from "./server.js";
 import type { SlimConnection } from "./transport/frame.js";
 import {
@@ -33,6 +34,8 @@ Options:
   -v, --verbose        Log every instruction and result to stderr
   -s, --timeout <sec>  Per-instruction timeout in seconds (decimals allowed)
   -d, --daemon         Keep listening after the first connection (TCP mode only)
+      --import <path>  Initial fixture import path; repeatable, later ones take precedence
+      --cwd <dir>      Base directory for relative import paths (default: current directory)
   -h, --help           Show this help and exit
 
 Notes:
@@ -50,6 +53,10 @@ export interface CliOptions {
   timeoutSeconds?: number;
   /** TCP port, or `null` for stdin/stdout pipe mode. */
   port: number | null;
+  /** Initial import paths from `--import`, in command-line order (last wins). */
+  imports?: readonly string[];
+  /** Base directory for relative import paths, from `--cwd`. */
+  cwd?: string;
 }
 
 export type ParseResult = { ok: true; options: CliOptions } | { ok: false; error: string };
@@ -95,6 +102,8 @@ export function parseArguments(argv: readonly string[]): ParseResult {
   let daemon = false;
   let help = false;
   let timeoutSeconds: number | undefined;
+  let cwd: string | undefined;
+  const imports: string[] = [];
   let optionsEnded = false;
   const positional: string[] = [];
 
@@ -150,6 +159,21 @@ export function parseArguments(argv: readonly string[]): ParseResult {
         timeoutSeconds = seconds;
         break;
       }
+      case "--import":
+      case "--cwd": {
+        let value = inlineValue;
+        if (value === undefined) {
+          index += 1;
+          value = argv[index];
+        }
+        if (value === undefined || value === "") return fail(`Option ${name} requires a value`);
+        if (name === "--import") {
+          imports.push(value);
+        } else {
+          cwd = value;
+        }
+        break;
+      }
       default:
         return fail(`Unknown option: ${argument}`);
     }
@@ -176,6 +200,8 @@ export function parseArguments(argv: readonly string[]): ParseResult {
       help,
       port,
       ...(timeoutSeconds === undefined ? {} : { timeoutSeconds }),
+      ...(imports.length === 0 ? {} : { imports }),
+      ...(cwd === undefined ? {} : { cwd }),
     },
   };
 }
@@ -300,13 +326,48 @@ function splitOption(argument: string): [string, string | undefined] {
 
 function defaultServer(options: CliOptions, io: CliIo): SlimServer {
   return new SlimServer({
-    fixtureLoader: new FixtureLoader(),
+    fixtureLoader: createFixtureLoader(options),
     verbose: options.verbose,
     logger: (message) => {
       io.stderr(`${message}\n`);
     },
     ...(options.timeoutSeconds === undefined ? {} : { timeoutSeconds: options.timeoutSeconds }),
   });
+}
+
+/**
+ * The loader for `--cwd` and `--import`.
+ *
+ * `--import` values apply in command-line order, as if each were an `import`
+ * instruction, so the last one takes precedence. A hook fixture that calls
+ * `resetPaths()` returns the loader to exactly these paths.
+ *
+ * @throws {Error} when `--cwd` is not a directory.
+ */
+export function createFixtureLoader(
+  options: Pick<CliOptions, "imports" | "cwd">,
+  overrides: Omit<FixtureLoaderOptions, "paths" | "cwd"> = {},
+): FixtureLoader {
+  let cwd: string | undefined;
+  if (options.cwd !== undefined) {
+    cwd = resolve(options.cwd);
+    if (!isDirectory(cwd)) {
+      throw new Error(`--cwd is not a directory: ${options.cwd}`);
+    }
+  }
+  return new FixtureLoader({
+    ...overrides,
+    paths: [...(options.imports ?? [])].reverse(),
+    ...(cwd === undefined ? {} : { cwd }),
+  });
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 async function serveStdio(

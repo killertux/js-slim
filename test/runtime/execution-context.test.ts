@@ -78,13 +78,24 @@ describe("ExecutionContext", () => {
     expect(context.getInstance("chained")).toBe(actor);
   });
 
-  it("adds import paths with later precedence and dedup", () => {
+  it("adds import paths with later precedence, moving a re-added path to the front", () => {
     const { context } = setup();
     context.addPath("/a");
     context.addPath("/b");
-    context.addPath("/a");
-
     expect(context.paths).toEqual(["/b", "/a"]);
+
+    context.addPath("/a");
+    expect(context.paths).toEqual(["/a", "/b"]);
+  });
+
+  it("resets import paths through its loader", () => {
+    const { context } = setup();
+    context.addPath("/a");
+    context.resetPaths(["/x"]);
+    expect(context.paths).toEqual(["/x"]);
+    expect(context.fixtureLoader.paths).toEqual(["/x"]);
+    context.resetPaths();
+    expect(context.paths).toEqual([]);
   });
 
   it("replaces symbols in arguments, walking nested lists", () => {

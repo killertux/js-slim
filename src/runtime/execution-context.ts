@@ -45,6 +45,11 @@ export class ExecutionContext {
     return [...this.libraryList];
   }
 
+  /** The loader that resolves this session's fixture class names. */
+  get fixtureLoader(): FixtureLoader {
+    return this.loader;
+  }
+
   /** Fixture import paths, most-recent first. */
   get paths(): readonly string[] {
     return this.loader.paths;
@@ -53,6 +58,11 @@ export class ExecutionContext {
   /** Add a fixture import path (later additions take precedence). */
   addPath(path: string): void {
     this.loader.addPath(path);
+  }
+
+  /** Replace the import paths; see {@link FixtureLoader.resetPaths}. */
+  resetPaths(paths?: readonly string[]): void {
+    this.loader.resetPaths(paths);
   }
 
   /** Register a library instance explicitly. */
