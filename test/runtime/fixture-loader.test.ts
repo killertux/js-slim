@@ -100,12 +100,79 @@ describe("FixtureLoader", () => {
     expect((await loader.load("Shared")).name).toBe("SharedSecond");
   });
 
-  it("only keeps each import path once, most-recent first", () => {
+  it("only keeps each import path once, moving a re-added path to the front", () => {
     const loader = new FixtureLoader();
     loader.addPath("/a");
     loader.addPath("/b");
+    loader.addPath("/c");
     loader.addPath("/a");
+    expect(loader.paths).toEqual(["/a", "/c", "/b"]);
+  });
+
+  it("keeps most-recent-first precedence among distinct paths", () => {
+    const loader = new FixtureLoader();
+    loader.addPath("/a");
+    loader.addPath("/b");
     expect(loader.paths).toEqual(["/b", "/a"]);
+    loader.addPath("/b");
+    expect(loader.paths).toEqual(["/b", "/a"]);
+  });
+
+  it("gives a re-imported path precedence again", async () => {
+    const loader = makeLoader();
+    loader.addPath(join(FIXTURES, "first"));
+    loader.addPath(join(FIXTURES, "second"));
+    loader.addPath(join(FIXTURES, "first"));
+    expect((await loader.load("Shared")).name).toBe("SharedFirst");
+  });
+
+  it("starts from the paths option, highest precedence first", () => {
+    const loader = new FixtureLoader({ paths: ["/b", "/a", "/b"] });
+    expect(loader.paths).toEqual(["/b", "/a"]);
+  });
+
+  it("resets to no paths by default", () => {
+    const loader = new FixtureLoader();
+    loader.addPath("/a");
+    loader.resetPaths();
+    expect(loader.paths).toEqual([]);
+  });
+
+  it("resets to the initial paths", () => {
+    const loader = new FixtureLoader({ paths: ["/base"] });
+    loader.addPath("/a");
+    loader.addPath("/base");
+    loader.resetPaths();
+    expect(loader.paths).toEqual(["/base"]);
+    loader.addPath("/b");
+    expect(loader.paths).toEqual(["/b", "/base"]);
+  });
+
+  it("resets to the given paths, dropping duplicates", () => {
+    const loader = new FixtureLoader({ paths: ["/base"] });
+    loader.addPath("/a");
+    loader.resetPaths(["/x", "/y", "/x"]);
+    expect(loader.paths).toEqual(["/x", "/y"]);
+    loader.resetPaths([]);
+    expect(loader.paths).toEqual([]);
+    loader.resetPaths();
+    expect(loader.paths).toEqual(["/base"]);
+  });
+
+  it("does not let a reset path list alias the caller's array", () => {
+    const paths = ["/a"];
+    const loader = new FixtureLoader();
+    loader.resetPaths(paths);
+    loader.addPath("/b");
+    expect(paths).toEqual(["/a"]);
+  });
+
+  it("stops resolving fixtures from paths removed by a reset", async () => {
+    const loader = makeLoader({ paths: [join(FIXTURES, "first")] });
+    loader.addPath(join(FIXTURES, "second"));
+    expect((await loader.load("Shared")).name).toBe("SharedSecond");
+    loader.resetPaths();
+    expect((await loader.load("Shared")).name).toBe("SharedFirst");
   });
 
   it("does not satisfy an unknown class from a module-file root's default export", async () => {
@@ -223,6 +290,61 @@ describe("FixtureLoader", () => {
     loader.addPath("/root");
 
     expect((await loader.load("Broken")).name).toBe("Fallback");
+  });
+});
+
+describe("dotted names in a nested layout", () => {
+  it("resolves a named export matching the last segment", async () => {
+    expect((await fixturesLoader().load("Ega.OpenOutcomes")).name).toBe("OpenOutcomes");
+  });
+
+  it("resolves a CommonJS named export", async () => {
+    expect((await fixturesLoader().load("Ega.LegacyOutcomes")).name).toBe("LegacyOutcomes");
+  });
+
+  it("resolves a CommonJS-compiled default export", async () => {
+    expect((await fixturesLoader().load("Ega.DefaultOutcomes")).name).toBe("DefaultOutcomes");
+  });
+
+  /** A loader whose only module is `/root/Ega/OpenOutcomes.ts`, imported as `namespace`. */
+  function nestedLoader(namespace: unknown): FixtureLoader {
+    const loader = makeLoader({
+      fileExists: (path) => path === join("/root", "Ega", "OpenOutcomes.ts"),
+      importer: async (specifier) => {
+        if (specifier.endsWith("/Ega/OpenOutcomes.ts")) return namespace;
+        throw new Error(`not found: ${specifier}`);
+      },
+    });
+    loader.addPath("/root");
+    return loader;
+  }
+
+  it.each([
+    ["an ESM named export", (cls: unknown) => ({ OpenOutcomes: cls })],
+    [
+      "a CommonJS named export (tsx interop)",
+      (cls: unknown) => ({ default: { OpenOutcomes: cls } }),
+    ],
+    [
+      "a CommonJS default export (tsx interop)",
+      (cls: unknown) => ({ default: { __esModule: true, default: cls } }),
+    ],
+    ["an ESM default export", (cls: unknown) => ({ default: cls })],
+  ])("resolves %s", async (_shape, build) => {
+    const OpenOutcomes = class OpenOutcomes {};
+    expect(await nestedLoader(build(OpenOutcomes)).load("Ega.OpenOutcomes")).toBe(OpenOutcomes);
+  });
+
+  it("still prefers the full export path over the last segment", async () => {
+    const Full = class Full {};
+    const loader = nestedLoader({ Ega: { OpenOutcomes: Full }, OpenOutcomes: class Other {} });
+    expect(await loader.load("Ega.OpenOutcomes")).toBe(Full);
+  });
+
+  it("does not accept a named export of another name", async () => {
+    await expect(nestedLoader({ Unrelated: class {} }).load("Ega.OpenOutcomes")).rejects.toThrow(
+      SlimError,
+    );
   });
 });
 

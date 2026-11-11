@@ -127,6 +127,7 @@ export type { SymbolResolver } from "./runtime/symbols.js";
 export { VariableStore } from "./runtime/variable-store.js";
 export type { StoredSymbol } from "./runtime/variable-store.js";
 export { FixtureLoader, swapCaseOfFirstLetter } from "./runtime/fixture-loader.js";
+export { currentFixtureLoader } from "./runtime/fixture-scope.js";
 export type {
   FixtureConstructor,
   FixtureImporter,

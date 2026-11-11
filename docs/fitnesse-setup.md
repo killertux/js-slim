@@ -131,18 +131,25 @@ order the fixture returns them in.
 ## Fixtures the CLI can load
 
 `|import|` adds a search root — a directory, a module file, or a package specifier — and later
-imports take precedence. Within a root, a fixture is found by:
+imports take precedence. Importing a root again moves it back to the front. Relative roots resolve
+against the server's working directory, or against `--cwd <dir>` when given. `--import <path>`
+(repeatable) adds roots before the first instruction arrives. Within a root, a fixture is found by:
 
 - the file derived from the requested name (`Calculator` → `<root>/Calculator.js`), using a default
   export or a named export of the same name;
 - a dotted name (`eg.Division` → `<root>/eg/Division.js`, `<root>/eg.Division.js`, or
-  `<root>/eg.js` exporting `Division`);
+  `<root>/eg.js` exporting `Division`). In the nested layout, `<root>/eg/Division.js` may use a
+  default export, a named export `Division`, or either one through CommonJS interop;
 - an export whose declared fixture `name` matches (`fixture({ name: "MyAlias" })` in
   `<root>/MyAlias.js`);
 - `swapCaseOfFirstLetter` as a fallback (`myFixture` finds `MyFixture`).
 
 Extensions tried in order: `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts`. TypeScript fixtures need a
 loader, e.g. `COMMAND_PATTERN {node --import tsx /abs/path/dist/esm/cli.js}`, or precompilation.
+
+A fixture can reach the session's loader through `currentFixtureLoader()`, e.g. to call
+`resetPaths()` from a per-file hook when one server process runs many test files. See "Persistent
+servers" in the README.
 
 ## Running the committed suite locally
 

@@ -4,6 +4,31 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Namespaced fixtures on a persistent server (one process serving many spec files, as Temoc's
+`persistent_server` does).
+
+### Added
+
+- `FixtureLoader.resetPaths(paths?)` replaces the import paths, and the `paths` constructor option
+  sets the initial ones that `resetPaths()` restores.
+- `currentFixtureLoader()` returns the running session's loader from inside a fixture (for example a
+  per-file hook). It works across the ESM and CJS builds.
+- `ExecutionContext.fixtureLoader` and `ExecutionContext.resetPaths`.
+- CLI `--import <path>` (repeatable) sets the initial import paths, so a fixture can be resolved
+  before any `import` instruction. CLI `--cwd <dir>` sets the base directory for relative import
+  paths.
+- A dotted name in the nested layout (`Ega.OpenOutcomes` → `<root>/Ega/OpenOutcomes.ts`) also
+  matches the named export `OpenOutcomes`, and the CommonJS-interop shapes
+  `default.OpenOutcomes` and `default.default`.
+
+### Changed
+
+- `FixtureLoader.addPath` moves a path that is already present to the front instead of ignoring it,
+  so a file that re-imports an earlier root gets it back in front of the roots imported since. Among
+  distinct paths, the most recent import still wins.
+
 ## [0.1.0] — 2026-09-11
 
 The first release: a complete SLiM server for FitNesse, plus the library it is built from.
@@ -44,4 +69,5 @@ The first release: a complete SLiM server for FitNesse, plus the library it is b
   `node:sqlite`.
 - Zero runtime dependencies. The core needs only Node built-ins.
 
+[Unreleased]: https://github.com/killertux/js-slim/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/killertux/js-slim/releases/tag/v0.1.0

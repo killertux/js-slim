@@ -89,7 +89,7 @@ TCP.
 ## Command line
 
 ```text
-js-slim [-v] [-s <seconds>] [-d] [-h] [port]
+js-slim [-v] [-s <seconds>] [-d] [--import <path>]... [--cwd <dir>] [-h] [port]
 ```
 
 | Flag              | Meaning                                                              |
@@ -98,10 +98,49 @@ js-slim [-v] [-s <seconds>] [-d] [-h] [port]
 | `-v`, `--verbose` | Log every instruction and result to stderr                           |
 | `-s`, `--timeout` | Per-instruction timeout in seconds (decimals allowed)                |
 | `-d`, `--daemon`  | Keep listening after the first connection (TCP mode only)            |
+| `--import <path>` | Initial import path, as if imported first; repeatable, last wins     |
+| `--cwd <dir>`     | Base directory for relative import paths (default: current dir)      |
 | `-h`, `--help`    | Show usage and exit                                                  |
 
 Exit codes mirror Java's `SlimService`: `0` success, `97` bad arguments, `98` startup failure,
 `99` out of memory. Java's `-i` (interaction class) and `-ssl` options are not supported.
+
+`--import` makes fixtures resolvable before any `import` instruction arrives, such as a hooks
+fixture created at the start of a run. `--cwd` applies to `--import` and to every relative `import`
+instruction. A `--cwd` that is not a directory exits `98`.
+
+### Persistent servers
+
+A runner that keeps one server for many spec files, such as [Temoc](https://github.com/killertux/temoc)
+with `persistent_server = true`, sends every file's `import` instructions to the same loader:
+
+- **Re-importing a path moves it to the front.** If file 1 imports `./a`, file 2 imports `./b` and
+  file 3 imports `./a` again, file 3 resolves from `./a` first. Among distinct paths, the most
+  recent import still wins.
+- **A per-file hook can reset the paths.** `currentFixtureLoader()` returns the session's loader while
+  a fixture's constructor or method runs. `resetPaths()` with no argument restores the `--import`
+  paths, so each file sees only the roots it imports itself:
+
+```ts
+import { currentFixtureLoader } from "@killertux/js-slim";
+
+export class SpecHooks {
+  beginFile(): void {
+    currentFixtureLoader()?.resetPaths();
+  }
+}
+```
+
+```toml
+# temoc.toml (sketch)
+persistent_server = true
+file_hooks = "SpecHooks"
+execute_server_command = "node --import tsx node_modules/@killertux/js-slim/dist/esm/cli.js --cwd specification/fixtures --import ."
+```
+
+`currentFixtureLoader()` works when a fixture imports the CommonJS build and the CLI runs the ESM
+build. Embedders can construct `new FixtureLoader({ paths })` and call `addPath` / `resetPaths`
+directly.
 
 ## Typed fixtures
 
@@ -165,7 +204,10 @@ bare `Array` (or `"list"`) yields the raw SLiM strings `["1", "2", "3"]`.
 
 Resolution note: the loader matches a fixture by the file name derived from the requested class
 name, _and_ by an export whose declared `name` matches, so a file named after the fixture works
-either way. Declared names do not apply to package-specifier import roots.
+either way. Declared names do not apply to package-specifier import roots. A dotted name such as
+`Ega.OpenOutcomes` finds `<root>/Ega/OpenOutcomes.ts` through its default export, a named export
+`OpenOutcomes`, or the same exports seen through CommonJS interop (`module.exports.OpenOutcomes`, or
+`export default` compiled to CommonJS).
 
 ## Types and conversion
 
@@ -243,7 +285,7 @@ await running.close();
 Beyond the entry points above: `parseInstruction` / instruction types, `serialize` / `deserialize` /
 `encodeLength`, `FrameReader` / `encodeFrame`, the stdio helpers (`createStdioConnection`,
 `installProcessOutputTunnel`), `StatementExecutor` / `ExecutionContext` / `VariableStore` /
-`MethodResolver` / `FixtureLoader`, the converter registry, and the fixture authoring API
+`MethodResolver` / `FixtureLoader` / `currentFixtureLoader`, the converter registry, and the fixture authoring API
 (`slimFixture`, `slimMethod`, `fixture`, `defineFixture`, `listOf`). Every export is listed in
 [`src/index.ts`](https://github.com/killertux/js-slim/blob/main/src/index.ts).
 

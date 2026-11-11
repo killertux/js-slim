@@ -138,6 +138,26 @@ describe("parseArguments", () => {
     expect(result.ok && result.options.port).toBe(8080);
   });
 
+  it("collects repeated --import options in order", () => {
+    const result = parseArguments(["--import", "./a", "--import=./b", "--cwd", "spec/fixtures"]);
+    expect(result).toEqual({
+      ok: true,
+      options: {
+        verbose: false,
+        daemon: false,
+        help: false,
+        port: null,
+        imports: ["./a", "./b"],
+        cwd: "spec/fixtures",
+      },
+    });
+  });
+
+  it("keeps the last --cwd", () => {
+    const result = parseArguments(["--cwd", "one", "--cwd=two"]);
+    expect(result.ok && result.options.cwd).toBe("two");
+  });
+
   it("treats a bare dash as a positional argument", () => {
     const result = parseArguments(["-"]);
     expect(result.ok).toBe(false);
@@ -157,6 +177,11 @@ describe("parseArguments", () => {
     [["-v=1"], "does not take a value"],
     [["-d=1"], "does not take a value"],
     [["-h=1"], "does not take a value"],
+    [["--import"], "Option --import requires a value"],
+    [["--import="], "Option --import requires a value"],
+    [["--cwd"], "Option --cwd requires a value"],
+    [["--cwd="], "Option --cwd requires a value"],
+    [["-i", "x"], "Unknown option: -i"],
     [["--nope"], "Unknown option: --nope"],
     [["80x"], "Invalid port"],
     [["70000"], "Invalid port"],

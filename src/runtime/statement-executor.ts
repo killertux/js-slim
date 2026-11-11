@@ -11,6 +11,7 @@ import { getMethodMeta, type MethodMeta } from "../fixture.js";
 import type { SlimInstruction } from "../instructions/types.js";
 import type { SlimSerializable, SlimValue } from "../protocol/types.js";
 import { ExecutionContext } from "./execution-context.js";
+import { runInFixtureScope } from "./fixture-scope.js";
 import { SLIM_HELPER_LIBRARY_NAME, SlimHelperLibrary, type ActorHost } from "./helper-library.js";
 import { MethodResolver, invokeMethod } from "./method-resolver.js";
 
@@ -198,6 +199,11 @@ export class StatementExecutor implements ActorHost {
 
   /** Execute a single parsed instruction, returning its `[id, value]` row. */
   async execute(instruction: SlimInstruction): Promise<SlimRow> {
+    const scope = { fixtureLoader: this.executionContext.fixtureLoader };
+    return await runInFixtureScope(scope, () => this.executeInScope(instruction));
+  }
+
+  private async executeInScope(instruction: SlimInstruction): Promise<SlimRow> {
     return await this.withTimeout(async () => {
       switch (instruction.kind) {
         case "import":

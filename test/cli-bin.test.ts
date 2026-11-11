@@ -1,5 +1,14 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -51,10 +60,13 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function run(args: readonly string[], options: { input?: string } = {}): Promise<RunResult> {
+function run(
+  args: readonly string[],
+  options: { input?: string; cwd?: string } = {},
+): Promise<RunResult> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
-      cwd: REPO,
+      cwd: options.cwd ?? REPO,
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -256,6 +268,83 @@ describe.skipIf(!BUILT)("built CLI", () => {
       expect(await server.exited).toBe(0);
     } finally {
       server.child.kill("SIGKILL");
+    }
+  }, 20000);
+
+  it("serves namespaced fixtures from a CommonJS package with --cwd and --import", async () => {
+    const lib = await loadLib();
+    const directory = mkdtempSync(join(tmpdir(), "js-slim-ns-"));
+    try {
+      // A `"type": "commonjs"` fixture package, like tsx-loaded TypeScript.
+      const fixtures = join(directory, "spec", "fixtures");
+      const write = (path: string, text: string): void => {
+        mkdirSync(join(fixtures, path, ".."), { recursive: true });
+        writeFileSync(join(fixtures, path), text);
+      };
+      writeFileSync(join(directory, "package.json"), '{ "type": "commonjs" }\n');
+      // The hook requires the CJS build while the CLI runs the ESM build.
+      write(
+        "SpecHooks.js",
+        `const { currentFixtureLoader } = require(${JSON.stringify(join(REPO, "dist", "cjs", "index.js"))});
+exports.SpecHooks = class SpecHooks {
+  beginFile() { currentFixtureLoader().resetPaths(); }
+};
+`,
+      );
+      for (const area of ["a", "b"]) {
+        write(
+          `${area}/Clash.js`,
+          `exports.Clash = class Clash { origin() { return "${area}"; } };\n`,
+        );
+      }
+      write(
+        "Ega/OpenOutcomes.js",
+        `Object.defineProperty(exports, "__esModule", { value: true });
+exports.default = class OpenOutcomes { status() { return "open"; } };
+`,
+      );
+
+      const file = (id: string, imports: string[]): unknown[] => [
+        [`${id}h`, "call", "hooks", "beginFile"],
+        ...imports.map((path, index) => [`${id}i${index}`, "import", path]),
+        [`${id}m`, "make", `x${id}`, "Clash"],
+        [`${id}c`, "call", `x${id}`, "origin"],
+      ];
+      const batches = [
+        [["h", "make", "hooks", "SpecHooks"]],
+        file("1", ["./a"]),
+        file("2", ["./b"]),
+        file("3", ["./a"]),
+        file("4", []),
+        [
+          ["n", "make", "ega", "Ega.OpenOutcomes"],
+          ["s", "call", "ega", "status"],
+        ],
+      ];
+      const input = Buffer.concat([
+        ...batches.map((batch) => lib.encodeFrame(lib.serialize(batch as never))),
+        lib.encodeFrame("bye"),
+      ]).toString("utf8");
+
+      const { code, stdout, stderr } = await run(["--cwd", "spec/fixtures", "--import", "."], {
+        input,
+        cwd: directory,
+      });
+      const results = new Map<string, unknown>();
+      for (const frame of parseStream(stdout).frames) {
+        for (const [id, value] of lib.deserialize(frame) as [string, unknown][]) {
+          results.set(id, value);
+        }
+      }
+
+      expect(stderr).toBe("");
+      expect(code).toBe(0);
+      expect(results.get("h")).toBe("OK");
+      expect([results.get("1c"), results.get("2c"), results.get("3c")]).toEqual(["a", "b", "a"]);
+      expect(String(results.get("4m"))).toContain("COULD_NOT_INVOKE_CONSTRUCTOR Clash");
+      expect(results.get("s")).toBe("open");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
   }, 20000);
 

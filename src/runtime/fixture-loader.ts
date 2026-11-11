@@ -28,6 +28,12 @@ export interface FixtureLoaderOptions {
   fileExists?: (path: string) => boolean;
   /** Base directory for relative import paths. Defaults to `process.cwd()`. */
   cwd?: string;
+  /**
+   * Initial import paths, highest precedence first (the order {@link
+   * FixtureLoader.paths} reports). {@link FixtureLoader.resetPaths} with no
+   * argument restores them. Defaults to none.
+   */
+  paths?: readonly string[];
 }
 
 const DEFAULT_EXTENSIONS = [".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"] as const;
@@ -85,7 +91,8 @@ interface Candidate {
  * (`…/eg.js` exporting `Division`) layouts.
  */
 export class FixtureLoader {
-  private readonly searchPaths: string[] = [];
+  private searchPaths: string[] = [];
+  private readonly initialPaths: readonly string[];
   private readonly moduleCache = new Map<string, Promise<unknown | null>>();
   private readonly resolver: FixtureResolver | undefined;
   private readonly extensions: readonly string[];
@@ -101,14 +108,34 @@ export class FixtureLoader {
     this.importer = options.importer ?? dynamicImport;
     this.fileExists = options.fileExists ?? isFile;
     this.cwd = options.cwd ?? process.cwd();
+    this.initialPaths = uniquePaths(options.paths ?? []);
+    this.searchPaths = [...this.initialPaths];
   }
 
-  /** Add an import path. Later additions take precedence; duplicates are ignored. */
+  /**
+   * Add an import path with the highest precedence.
+   *
+   * Adding a path that is already present moves it to the front, so on a
+   * persistent server a file that re-imports an earlier root gets that root
+   * back in front of the ones imported since.
+   */
   addPath(path: string): void {
-    if (this.searchPaths.includes(path)) {
-      return;
+    const existing = this.searchPaths.indexOf(path);
+    if (existing !== -1) {
+      this.searchPaths.splice(existing, 1);
     }
     this.searchPaths.unshift(path);
+  }
+
+  /**
+   * Replace the import paths, highest precedence first.
+   *
+   * With no argument, restores the paths the loader was constructed with (the
+   * `paths` option; none by default). Duplicates keep their first position.
+   * Loaded modules stay cached: only the search order changes.
+   */
+  resetPaths(paths: readonly string[] = this.initialPaths): void {
+    this.searchPaths = uniquePaths(paths);
   }
 
   /** The configured import paths, most-recent first. */
@@ -249,6 +276,14 @@ export class FixtureLoader {
       file(nested, []);
       file(nested, segments);
       file(nested, ["default", ...segments]);
+      // The file is named after the last segment, so a named export of that
+      // name matches too (`Ega.OpenOutcomes` → `Ega/OpenOutcomes.ts` exporting
+      // `OpenOutcomes`). The `default` forms cover a CommonJS module imported
+      // as ESM, whose namespace `default` is the `module.exports` object.
+      const last = segments[segments.length - 1] as string;
+      file(nested, [last]);
+      file(nested, ["default", last]);
+      file(nested, ["default", "default"]);
       declared(nested);
 
       if (segments.length > 1) {
@@ -308,6 +343,11 @@ export class FixtureLoader {
     }
     return cached;
   }
+}
+
+/** Copy of `paths` without duplicates, keeping each one's first position. */
+function uniquePaths(paths: readonly string[]): string[] {
+  return [...new Set(paths)];
 }
 
 /** Swap the case of the first character, e.g. `myFixture` → `MyFixture`. */
